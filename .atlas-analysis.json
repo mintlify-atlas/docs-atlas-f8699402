@@ -1,0 +1,97 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "TOON",
+  "projectDescription": "Token-Oriented Object Notation (TOON) – Compact, human-readable, schema-aware JSON encoding for LLM prompts",
+  "theme": "palm",
+  "primaryColor": "#f7efc0",
+  "lightColor": "#948c74",
+  "darkColor": "#1f1f1f",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/what-is-toon",
+              "concepts/format-overview",
+              "concepts/when-to-use"
+            ]
+          },
+          {
+            "group": "Usage Guides",
+            "pages": [
+              "guides/encoding",
+              "guides/decoding",
+              "guides/streaming",
+              "guides/cli",
+              "guides/llm-integration"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/benchmarks",
+              "advanced/performance",
+              "advanced/replacer-function",
+              "advanced/options"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Functions",
+            "pages": [
+              "api/encode",
+              "api/decode",
+              "api/encode-lines",
+              "api/decode-from-lines"
+            ]
+          },
+          {
+            "group": "Streaming",
+            "pages": [
+              "api/decode-stream-sync",
+              "api/decode-stream"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/encode-options",
+              "api/decode-options",
+              "api/types"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Token-efficient JSON encoding optimized for LLM prompts",
+    "Lossless bidirectional conversion between JSON and TOON",
+    "Tabular array format for compact uniform data",
+    "Streaming APIs for memory-efficient processing",
+    "TypeScript SDK with comprehensive type definitions",
+    "CLI tool for quick conversions and token analysis"
+  ],
+  "publicApiSurface": [
+    "encode(input, options?)",
+    "decode(input, options?)",
+    "encodeLines(input, options?)",
+    "decodeFromLines(lines, options?)",
+    "decodeStreamSync(lines, options?)",
+    "decodeStream(source, options?)"
+  ]
+}
