@@ -1,0 +1,571 @@
+---
+title: 'Decoding TOON to JSON'
+description: 'Parse TOON format back into JavaScript values with validation, path expansion, and error handling'
+---
+
+## Overview
+
+TOON decoding converts TOON format strings back into JavaScript values (objects, arrays, primitives). The SDK provides multiple decoding functions with options for validation, path expansion, and streaming processing.
+
+## Basic Decoding
+
+### Simple Objects
+
+The `decode()` function parses TOON format into JavaScript:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+name: Alice
+age: 30
+active: true
+`
+
+const data = decode(toon)
+console.log(data)
+// { name: 'Alice', age: 30, active: true }
+```
+
+### Nested Objects
+
+Nested structures are reconstructed from indentation:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+user:
+  profile:
+    name: Bob
+    email: bob@example.com
+`
+
+const data = decode(toon)
+console.log(data)
+// {
+//   user: {
+//     profile: {
+//       name: 'Bob',
+//       email: 'bob@example.com'
+//     }
+//   }
+// }
+```
+
+### Tabular Arrays
+
+TOON's tabular format is decoded back into arrays of objects:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+users[3]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user
+  3,Carol,user
+`
+
+const data = decode(toon)
+console.log(data)
+// {
+//   users: [
+//     { id: 1, name: 'Alice', role: 'admin' },
+//     { id: 2, name: 'Bob', role: 'user' },
+//     { id: 3, name: 'Carol', role: 'user' }
+//   ]
+// }
+```
+
+### Primitive Arrays
+
+Inline primitive arrays are parsed correctly:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+tags[3]: typescript,node,api
+scores[3]: 95,87,92
+`
+
+const data = decode(toon)
+console.log(data)
+// {
+//   tags: ['typescript', 'node', 'api'],
+//   scores: [95, 87, 92]
+// }
+```
+
+## Decoding Options
+
+Customize decoding behavior with the `DecodeOptions` interface:
+
+```typescript
+interface DecodeOptions {
+  indent?: number              // Spaces per indentation level (default: 2)
+  strict?: boolean             // Enable validation (default: true)
+  expandPaths?: 'off' | 'safe' // Expand dotted keys to nested objects (default: 'off')
+}
+```
+
+### Custom Indentation
+
+Match the indentation used during encoding:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+server:
+    host: localhost
+    port: 8080
+`
+
+// Specify 4-space indentation
+const data = decode(toon, { indent: 4 })
+console.log(data)
+// { server: { host: 'localhost', port: 8080 } }
+```
+
+### Strict Mode
+
+Strict mode validates array lengths and field counts:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+// Valid data with correct length
+const validToon = `
+users[2]{id,name}:
+  1,Alice
+  2,Bob
+`
+const data = decode(validToon, { strict: true })
+// ✓ Success
+
+// Invalid: declared length 2 but only 1 row
+const invalidToon = `
+users[2]{id,name}:
+  1,Alice
+`
+try {
+  decode(invalidToon, { strict: true })
+} catch (error) {
+  console.error('Array length mismatch detected')
+  // ✗ Throws error in strict mode
+}
+```
+
+<Note>
+  Strict mode is enabled by default (`strict: true`). It catches truncated data, missing rows, and field count mismatches. Disable for lenient parsing: `{ strict: false }`.
+</Note>
+
+### Path Expansion
+
+Path expansion reconstructs dotted keys into nested objects:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+// TOON with folded keys
+const toon = `
+database.connection.pool:
+  max: 10
+  min: 2
+`
+
+// Without path expansion (default)
+const flat = decode(toon)
+console.log(flat)
+// { 'database.connection.pool': { max: 10, min: 2 } }
+
+// With path expansion
+const nested = decode(toon, { expandPaths: 'safe' })
+console.log(nested)
+// {
+//   database: {
+//     connection: {
+//       pool: { max: 10, min: 2 }
+//     }
+//   }
+// }
+```
+
+<Warning>
+  Only use `expandPaths: 'safe'` when decoding data that was encoded with `keyFolding: 'safe'`. This ensures lossless round-trips.
+</Warning>
+
+## Validation and Error Handling
+
+### Array Length Validation
+
+TOON's `[N]` syntax enables automatic validation:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+// Declared 3 items, provided 3 items
+const validData = `
+users[3]{id,name}:
+  1,Alice
+  2,Bob
+  3,Carol
+`
+const result = decode(validData, { strict: true })
+// ✓ Success: array length matches declaration
+
+// Declared 3 items, provided only 2
+const truncatedData = `
+users[3]{id,name}:
+  1,Alice
+  2,Bob
+`
+try {
+  decode(truncatedData, { strict: true })
+} catch (error) {
+  console.error('Validation failed:', error.message)
+  // ✗ Error: Expected 3 rows but got 2
+}
+```
+
+### Field Count Validation
+
+Strict mode validates field counts match headers:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+// Valid: all rows have 3 fields matching header
+const validData = `
+products[2]{id,name,price}:
+  1,Widget,29.99
+  2,Gadget,19.99
+`
+const result = decode(validData, { strict: true })
+// ✓ Success
+
+// Invalid: row 2 missing price field
+const invalidData = `
+products[2]{id,name,price}:
+  1,Widget,29.99
+  2,Gadget
+`
+try {
+  decode(invalidData, { strict: true })
+} catch (error) {
+  console.error('Field count mismatch:', error.message)
+  // ✗ Error: Expected 3 fields but got 2
+}
+```
+
+### Lenient Mode
+
+Disable strict validation for flexible parsing:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+// Incomplete data
+const incompleteData = `
+users[5]{id,name}:
+  1,Alice
+  2,Bob
+`
+
+// Strict mode: throws error
+try {
+  decode(incompleteData, { strict: true })
+} catch (error) {
+  console.error('Strict mode rejected data')
+}
+
+// Lenient mode: accepts partial data
+const result = decode(incompleteData, { strict: false })
+console.log(result)
+// { users: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] }
+// ✓ Success: length mismatch ignored
+```
+
+<Tip>
+  Use strict mode for production data validation. Use lenient mode when parsing potentially truncated or incomplete data from external sources.
+</Tip>
+
+## Decoding from Lines
+
+When you already have lines as an array, use `decodeFromLines()`:
+
+```typescript
+import { decodeFromLines } from '@toon-format/toon'
+import { readFile } from 'node:fs/promises'
+
+// Read file and split into lines
+const content = await readFile('data.toon', 'utf-8')
+const lines = content.split('\n')
+
+// Decode from pre-split lines
+const data = decodeFromLines(lines)
+console.log(data)
+```
+
+### With Options
+
+```typescript
+import { decodeFromLines } from '@toon-format/toon'
+
+const lines = [
+  'database.connection:',
+  '  host: localhost',
+  '  port: 5432'
+]
+
+const data = decodeFromLines(lines, {
+  indent: 2,
+  strict: true,
+  expandPaths: 'safe'
+})
+
+console.log(data)
+// {
+//   database: {
+//     connection: {
+//       host: 'localhost',
+//       port: 5432
+//     }
+//   }
+// }
+```
+
+## Handling Different Delimiters
+
+The decoder automatically detects delimiters from the TOON format:
+
+### Comma Delimiter
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+metrics[2]{date,views,clicks}:
+  2025-01-01,1000,50
+  2025-01-02,1200,65
+`
+
+const data = decode(toon)
+// Comma delimiter detected automatically
+```
+
+### Tab Delimiter
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+metrics[2]{date,views,clicks}:
+  2025-01-01\t1000\t50
+  2025-01-02\t1200\t65
+`
+
+const data = decode(toon)
+// Tab delimiter detected automatically
+```
+
+### Pipe Delimiter
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `
+products[2]{id,name,price}:
+  1|Widget, Premium|29.99
+  2|Gadget, Standard|19.99
+`
+
+const data = decode(toon)
+// Pipe delimiter detected automatically
+// Commas in data are preserved
+```
+
+## Type Safety
+
+Decoded values follow the JSON type system:
+
+```typescript
+import { decode } from '@toon-format/toon'
+import type { JsonValue } from '@toon-format/toon'
+
+const toon = `
+name: Alice
+age: 30
+active: true
+tags[2]: dev,admin
+`
+
+const data: JsonValue = decode(toon)
+// Type: JsonValue = JsonObject | JsonArray | JsonPrimitive
+// Primitives: string | number | boolean | null
+
+// Type narrowing
+if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+  console.log(data.name)  // Type-safe access
+}
+```
+
+## Round-Trip Encoding
+
+Verify lossless conversion:
+
+```typescript
+import { encode, decode } from '@toon-format/toon'
+
+const original = {
+  users: [
+    { id: 1, name: 'Alice', active: true },
+    { id: 2, name: 'Bob', active: false }
+  ]
+}
+
+// Encode to TOON
+const toon = encode(original)
+
+// Decode back to JavaScript
+const restored = decode(toon)
+
+// Verify equality
+console.log(JSON.stringify(original) === JSON.stringify(restored))
+// true - lossless round-trip
+```
+
+### With Key Folding
+
+```typescript
+import { encode, decode } from '@toon-format/toon'
+
+const original = {
+  database: {
+    connection: {
+      host: 'localhost',
+      port: 5432
+    }
+  }
+}
+
+// Encode with key folding
+const toon = encode(original, { keyFolding: 'safe' })
+
+// Decode with path expansion
+const restored = decode(toon, { expandPaths: 'safe' })
+
+// Verify equality
+console.log(JSON.stringify(original) === JSON.stringify(restored))
+// true - lossless with folding/expansion
+```
+
+<Steps>
+  <Step title="Parse TOON string">
+    Use `decode()` for strings or `decodeFromLines()` for pre-split lines.
+  </Step>
+  
+  <Step title="Configure validation">
+    Enable strict mode (`strict: true`) to catch malformed data.
+  </Step>
+  
+  <Step title="Handle path expansion">
+    Use `expandPaths: 'safe'` when data was encoded with `keyFolding: 'safe'`.
+  </Step>
+  
+  <Step title="Handle errors">
+    Wrap decode calls in try-catch to handle validation errors gracefully.
+  </Step>
+</Steps>
+
+## API Reference
+
+### `decode(input, options?)`
+
+Decodes a TOON format string into a JavaScript value.
+
+**Parameters:**
+- `input: string` - TOON formatted string
+- `options?: DecodeOptions` - Optional configuration
+
+**Returns:** `JsonValue` - Parsed JavaScript value
+
+**Source:** [packages/toon/src/index.ts:70](/home/daytona/workspace/source/packages/toon/src/index.ts:70)
+
+### `decodeFromLines(lines, options?)`
+
+Decodes TOON format from pre-split lines.
+
+**Parameters:**
+- `lines: Iterable<string>` - Iterable of TOON lines (without newlines)
+- `options?: DecodeOptions` - Optional configuration
+
+**Returns:** `JsonValue` - Parsed JavaScript value
+
+**Source:** [packages/toon/src/index.ts:129](/home/daytona/workspace/source/packages/toon/src/index.ts:129)
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Enable strict mode" icon="shield-check">
+    Use `strict: true` in production to catch malformed data early.
+  </Card>
+  
+  <Card title="Match indentation" icon="indent">
+    Ensure decoder `indent` option matches the encoded data.
+  </Card>
+  
+  <Card title="Test round-trips" icon="rotate">
+    Verify `decode(encode(data))` equals original data.
+  </Card>
+  
+  <Card title="Handle errors" icon="triangle-exclamation">
+    Wrap decode calls in try-catch for graceful error handling.
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+### Indentation Mismatch
+
+```typescript
+// Data encoded with 4-space indent
+const toon = encode(data, { indent: 4 })
+
+// ✗ Wrong: decoding with default 2-space
+const wrong = decode(toon)  // May parse incorrectly
+
+// ✓ Correct: match the indent
+const correct = decode(toon, { indent: 4 })
+```
+
+### Missing Path Expansion
+
+```typescript
+// Encoded with key folding
+const toon = encode(data, { keyFolding: 'safe' })
+
+// ✗ Wrong: no path expansion
+const flat = decode(toon)
+// Result: { 'database.connection': { ... } }
+
+// ✓ Correct: use path expansion
+const nested = decode(toon, { expandPaths: 'safe' })
+// Result: { database: { connection: { ... } } }
+```
+
+## Next Steps
+
+<Card title="Streaming Decode" icon="arrow-right" href="/guides/streaming">
+  Process large TOON files with streaming APIs
+</Card>
+
+<Card title="Encoding" icon="arrow-right" href="/guides/encoding">
+  Learn how to encode JavaScript values to TOON format
+</Card>
+
+<Card title="LLM Integration" icon="arrow-right" href="/guides/llm-integration">
+  Use TOON format effectively with Large Language Models
+</Card>

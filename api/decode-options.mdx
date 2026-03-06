@@ -1,0 +1,330 @@
+---
+title: 'DecodeOptions'
+description: 'Configuration options for decoding TOON format to JavaScript values'
+---
+
+The `DecodeOptions` interface allows you to customize how TOON format strings are decoded to JavaScript values. All options are optional and have sensible defaults.
+
+## Interface
+
+```typescript
+interface DecodeOptions {
+  indent?: number
+  strict?: boolean
+  expandPaths?: 'off' | 'safe'
+}
+```
+
+## Options
+
+<ParamField path="indent" type="number" default={2}>
+  Number of spaces per indentation level. Must match the indentation used when encoding.
+
+  This tells the decoder how many spaces represent one level of nesting. If your TOON data was encoded with a different indent setting, you must use the same value when decoding.
+
+  <Accordion title="Example">
+    ```typescript
+    import { decode } from 'toon'
+
+    // TOON with 2-space indentation (default)
+    const toon2 = `user:
+      name: Alice
+      age: 30`
+
+    decode(toon2)
+    // { user: { name: 'Alice', age: 30 } }
+
+    // TOON with 4-space indentation
+    const toon4 = `user:
+        name: Alice
+        age: 30`
+
+    decode(toon4, { indent: 4 })
+    // { user: { name: 'Alice', age: 30 } }
+
+    // Mismatched indent causes incorrect parsing
+    decode(toon4, { indent: 2 })
+    // Error or incorrect structure
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="strict" type="boolean" default={true}>
+  When `true`, enforce strict validation of array lengths and tabular row counts.
+
+  Strict mode validates that:
+  - Array item counts match the declared length in array headers
+  - Tabular arrays have exactly the specified number of rows
+  - No blank lines appear within array/tabular data
+  - No extra items appear after arrays
+
+  Set to `false` for lenient parsing that tolerates minor formatting issues.
+
+  <Accordion title="Example">
+    ```typescript
+    import { decode } from 'toon'
+
+    // TOON declares 3 items but only has 2
+    const invalidToon = `items[3]:
+      - apple
+      - banana`
+
+    // Strict mode (default) - throws error
+    try {
+      decode(invalidToon)
+    } catch (err) {
+      console.error('Validation failed:', err.message)
+      // Error: Expected 3 list array items but found 2
+    }
+
+    // Lenient mode - succeeds
+    decode(invalidToon, { strict: false })
+    // { items: ['apple', 'banana'] }
+
+    // Valid TOON works in both modes
+    const validToon = `items[2]:
+      - apple
+      - banana`
+
+    decode(validToon) // strict: true
+    decode(validToon, { strict: false })
+    // Both return: { items: ['apple', 'banana'] }
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="expandPaths" type="'off' | 'safe'" default="'off'">
+  Enable path expansion to reconstruct dotted keys into nested objects.
+
+  When set to `'safe'`, keys containing dots are expanded into nested structures if all segments are valid identifiers (e.g., `data.metadata.items` becomes nested objects). This pairs with `keyFolding: 'safe'` in `EncodeOptions` for lossless round-trips.
+
+  <Note>
+    Path expansion is **not supported** in streaming decode (`decodeStream` and `decodeStreamSync`). It only works with the standard `decode()` and `decodeFromLines()` functions.
+  </Note>
+
+  <Accordion title="Example">
+    ```typescript
+    import { decode, encode } from 'toon'
+
+    // TOON with folded keys
+    const toon = `response.data.user.name: Alice
+response.data.user.age: 30`
+
+    // Without path expansion (default)
+    decode(toon)
+    // {
+    //   'response.data.user.name': 'Alice',
+    //   'response.data.user.age': 30
+    // }
+
+    // With safe path expansion
+    decode(toon, { expandPaths: 'safe' })
+    // {
+    //   response: {
+    //     data: {
+    //       user: {
+    //         name: 'Alice',
+    //         age: 30
+    //       }
+    //     }
+    //   }
+    // }
+
+    // Round-trip with key folding
+    const original = {
+      response: {
+        data: {
+          user: {
+            name: 'Alice'
+          }
+        }
+      }
+    }
+
+    const encoded = encode(original, { keyFolding: 'safe' })
+    // response.data.user.name: Alice
+
+    const decoded = decode(encoded, { expandPaths: 'safe' })
+    // Matches original structure
+    ```
+  </Accordion>
+</ParamField>
+
+## Type: ResolvedDecodeOptions
+
+The internal type representing fully resolved decoding options with all defaults applied:
+
+```typescript
+type ResolvedDecodeOptions = Readonly<Required<DecodeOptions>>
+```
+
+This type is used internally by the decoder after resolving all option defaults. You typically don't need to use this type directly.
+
+## DecodeStreamOptions
+
+For streaming decode operations, a specialized options interface is available that explicitly omits `expandPaths`:
+
+```typescript
+interface DecodeStreamOptions extends Omit<DecodeOptions, 'expandPaths'> {
+  expandPaths?: never
+}
+```
+
+Path expansion requires buffering the entire input, which contradicts the streaming model. If you need path expansion, use `decode()` or `decodeFromLines()` instead.
+
+<Accordion title="Streaming limitations">
+  ```typescript
+  import { decodeStreamSync } from 'toon'
+
+  const lines = ['user.name: Alice', 'user.age: 30']
+
+  // This works - no path expansion
+  for (const event of decodeStreamSync(lines)) {
+    console.log(event)
+  }
+
+  // This throws an error
+  try {
+    for (const event of decodeStreamSync(lines, { expandPaths: 'safe' })) {
+      // ...
+    }
+  } catch (err) {
+    console.error('Error:', err.message)
+    // "expandPaths is not supported in streaming decode"
+  }
+
+  // Use decode() if you need path expansion
+  import { decode } from 'toon'
+  const result = decode(lines.join('\n'), { expandPaths: 'safe' })
+  ```
+</Accordion>
+
+## Usage Examples
+
+### Basic decoding with custom options
+
+```typescript
+import { decode } from 'toon'
+
+const toon = `users[2]{id,name,email}:
+  1, Alice, alice@example.com
+  2, Bob, bob@example.com`
+
+const options = {
+  indent: 2,
+  strict: true,
+  expandPaths: 'off' as const
+}
+
+const data = decode(toon, options)
+console.log(data)
+// {
+//   users: [
+//     { id: 1, name: 'Alice', email: 'alice@example.com' },
+//     { id: 2, name: 'Bob', email: 'bob@example.com' }
+//   ]
+// }
+```
+
+### Lenient parsing for imperfect data
+
+```typescript
+import { decode } from 'toon'
+
+// Data from an external source that may have formatting issues
+const messyToon = `items[10]:
+  - item1
+  - item2
+  - item3`
+  // Only 3 items instead of declared 10
+
+// Use lenient mode to parse anyway
+const data = decode(messyToon, { strict: false })
+console.log(data.items.length) // 3
+```
+
+### Round-trip with key folding
+
+<CodeGroup>
+```typescript Encode
+import { encode } from 'toon'
+
+const data = {
+  config: {
+    database: {
+      host: 'localhost',
+      port: 5432
+    }
+  }
+}
+
+const toon = encode(data, { keyFolding: 'safe' })
+console.log(toon)
+// config.database.host: localhost
+// config.database.port: 5432
+```
+
+```typescript Decode
+import { decode } from 'toon'
+
+const toon = `config.database.host: localhost
+config.database.port: 5432`
+
+const data = decode(toon, { expandPaths: 'safe' })
+console.log(data)
+// {
+//   config: {
+//     database: {
+//       host: 'localhost',
+//       port: 5432
+//     }
+//   }
+// }
+```
+</CodeGroup>
+
+### Streaming decode (no path expansion)
+
+```typescript
+import { decodeStreamSync } from 'toon'
+
+const toon = `name: Alice
+age: 30
+active: true`
+
+const lines = toon.split('\n')
+
+// Stream events without path expansion
+for (const event of decodeStreamSync(lines, { indent: 2, strict: true })) {
+  console.log(event)
+  // { type: 'startObject' }
+  // { type: 'key', key: 'name' }
+  // { type: 'primitive', value: 'Alice' }
+  // { type: 'key', key: 'age' }
+  // { type: 'primitive', value: 30 }
+  // { type: 'key', key: 'active' }
+  // { type: 'primitive', value: true }
+  // { type: 'endObject' }
+}
+```
+
+## Validation Errors
+
+When `strict: true` (default), the decoder will throw errors for various validation failures:
+
+| Error Type | Description |
+|------------|-------------|
+| **Array length mismatch** | Declared array length doesn't match actual item count |
+| **Tabular row count mismatch** | Number of rows doesn't match array header declaration |
+| **Blank lines in arrays** | Blank lines found within array/tabular data boundaries |
+| **Extra list items** | More list items found than declared in array header |
+| **Field count mismatch** | Tabular row has wrong number of values for declared fields |
+
+Set `strict: false` to disable these validations and parse data in a more lenient manner.
+
+## See Also
+
+- [EncodeOptions](/api/encode-options) - Options for encoding JavaScript to TOON
+- [Types](/api/types) - Complete type definitions
+- [decode()](/api/decode) - Main decoding function
+- [decodeStream()](/api/decode-stream) - Streaming decoder

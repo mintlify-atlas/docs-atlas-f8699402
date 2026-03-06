@@ -1,0 +1,549 @@
+---
+title: 'Type Definitions'
+description: 'Complete TypeScript type definitions for the TOON library'
+---
+
+This page documents all exported TypeScript types, interfaces, and type aliases used throughout the TOON library.
+
+## JSON Value Types
+
+Types representing valid JSON values that can be encoded/decoded.
+
+### JsonPrimitive
+
+Represents JSON primitive values.
+
+```typescript
+type JsonPrimitive = string | number | boolean | null
+```
+
+Valid primitive types that can appear in JSON:
+- `string` - Text values
+- `number` - Numeric values (integers and floats)
+- `boolean` - `true` or `false`
+- `null` - Null value
+
+<Accordion title="Example">
+  ```typescript
+  import type { JsonPrimitive } from 'toon'
+
+  const name: JsonPrimitive = 'Alice'
+  const age: JsonPrimitive = 30
+  const active: JsonPrimitive = true
+  const nothing: JsonPrimitive = null
+  ```
+</Accordion>
+
+### JsonObject
+
+Represents a JSON object with string keys and JsonValue values.
+
+```typescript
+type JsonObject = { [Key in string]: JsonValue } & {
+  [Key in string]?: JsonValue | undefined
+}
+```
+
+An object where:
+- Keys are always strings
+- Values can be any `JsonValue` (including nested objects and arrays)
+- Properties can be optional or undefined
+
+<Accordion title="Example">
+  ```typescript
+  import type { JsonObject } from 'toon'
+
+  const user: JsonObject = {
+    name: 'Alice',
+    age: 30,
+    tags: ['admin', 'user'],
+    metadata: {
+      created: '2024-01-01',
+      active: true
+    }
+  }
+  ```
+</Accordion>
+
+### JsonArray
+
+Represents a JSON array of JsonValue elements.
+
+```typescript
+type JsonArray = JsonValue[] | readonly JsonValue[]
+```
+
+An array containing any valid JSON values. Supports both mutable and readonly arrays.
+
+<Accordion title="Example">
+  ```typescript
+  import type { JsonArray } from 'toon'
+
+  const numbers: JsonArray = [1, 2, 3, 4, 5]
+  const mixed: JsonArray = ['hello', 42, true, null, { key: 'value' }]
+  const nested: JsonArray = [[1, 2], [3, 4], [5, 6]]
+  const readonlyArr: JsonArray = [1, 2, 3] as const
+  ```
+</Accordion>
+
+### JsonValue
+
+Union type representing any valid JSON value.
+
+```typescript
+type JsonValue = JsonPrimitive | JsonObject | JsonArray
+```
+
+This is the top-level type for any JSON-compatible value. Used as the input/output type for encode/decode functions.
+
+<Accordion title="Example">
+  ```typescript
+  import type { JsonValue } from 'toon'
+  import { encode, decode } from 'toon'
+
+  // Any of these are valid JsonValue
+  const primitive: JsonValue = 'hello'
+  const object: JsonValue = { name: 'Alice', age: 30 }
+  const array: JsonValue = [1, 2, 3]
+  const complex: JsonValue = {
+    users: [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' }
+    ],
+    metadata: {
+      total: 2,
+      page: 1
+    }
+  }
+
+  // encode/decode work with any JsonValue
+  const toon = encode(complex)
+  const decoded: JsonValue = decode(toon)
+  ```
+</Accordion>
+
+## Delimiter Types
+
+Types for controlling how values are separated in arrays.
+
+### DelimiterKey
+
+String literal type for delimiter names.
+
+```typescript
+type DelimiterKey = 'comma' | 'tab' | 'pipe'
+```
+
+Available delimiter types:
+- `'comma'` - Comma-separated values (default)
+- `'tab'` - Tab-separated values
+- `'pipe'` - Pipe-separated values
+
+### Delimiter
+
+The actual delimiter character type.
+
+```typescript
+type Delimiter = ',' | '\t' | '|'
+```
+
+The character used to separate values:
+- `','` - Comma (comma key)
+- `'\t'` - Tab character (tab key)
+- `'|'` - Pipe (pipe key)
+
+<Accordion title="Example">
+  ```typescript
+  import type { Delimiter, DelimiterKey } from 'toon'
+  import { DELIMITERS } from 'toon'
+
+  // Access delimiters by key
+  const commaDelim: Delimiter = DELIMITERS.comma // ','
+  const tabDelim: Delimiter = DELIMITERS.tab     // '\t'
+  const pipeDelim: Delimiter = DELIMITERS.pipe   // '|'
+
+  // Use in options
+  import { encode } from 'toon'
+  encode(data, { delimiter: DELIMITERS.pipe })
+  ```
+</Accordion>
+
+## Encoder Types
+
+Types related to the encoding process.
+
+### EncodeReplacer
+
+Function type for transforming or filtering values during encoding.
+
+```typescript
+type EncodeReplacer = (
+  key: string,
+  value: JsonValue,
+  path: readonly (string | number)[]
+) => unknown
+```
+
+**Parameters:**
+- `key` - The property key or array index (as string). Empty string (`''`) for root value.
+- `value` - The normalized `JsonValue` at this location.
+- `path` - Array representing the path from root to this value.
+
+**Returns:**
+- The replacement value (will be normalized again), or `undefined` to omit.
+- For root value, returning `undefined` means "no change" (don't omit root).
+
+<Accordion title="Example">
+  ```typescript
+  import type { EncodeReplacer } from 'toon'
+  import { encode } from 'toon'
+
+  // Remove password fields
+  const removeSensitive: EncodeReplacer = (key, value) => {
+    if (key === 'password') return undefined
+    return value
+  }
+
+  // Add path-based transformations
+  const transformDates: EncodeReplacer = (key, value, path) => {
+    if (value instanceof Date) {
+      return value.toISOString()
+    }
+    return value
+  }
+
+  // Use with encode
+  const data = {
+    username: 'alice',
+    password: 'secret',
+    lastLogin: new Date()
+  }
+
+  encode(data, { replacer: transformDates })
+  ```
+</Accordion>
+
+### EncodeOptions
+
+Configuration interface for encoding operations.
+
+```typescript
+interface EncodeOptions {
+  indent?: number
+  delimiter?: Delimiter
+  keyFolding?: 'off' | 'safe'
+  flattenDepth?: number
+  replacer?: EncodeReplacer
+}
+```
+
+See [EncodeOptions](/api/encode-options) for detailed documentation of each field.
+
+### ResolvedEncodeOptions
+
+Internal type representing fully resolved encoding options.
+
+```typescript
+type ResolvedEncodeOptions = 
+  Readonly<Required<Omit<EncodeOptions, 'replacer'>>> & 
+  Pick<EncodeOptions, 'replacer'>
+```
+
+All required fields are present with their default values, except `replacer` which remains optional. This type is used internally and typically not needed in application code.
+
+## Decoder Types
+
+Types related to the decoding process.
+
+### DecodeOptions
+
+Configuration interface for decoding operations.
+
+```typescript
+interface DecodeOptions {
+  indent?: number
+  strict?: boolean
+  expandPaths?: 'off' | 'safe'
+}
+```
+
+See [DecodeOptions](/api/decode-options) for detailed documentation of each field.
+
+### DecodeStreamOptions
+
+Specialized options interface for streaming decode that explicitly omits `expandPaths`.
+
+```typescript
+interface DecodeStreamOptions extends Omit<DecodeOptions, 'expandPaths'> {
+  expandPaths?: never
+}
+```
+
+Path expansion is not supported in streaming mode because it requires buffering the entire input.
+
+<Accordion title="Example">
+  ```typescript
+  import type { DecodeStreamOptions } from 'toon'
+  import { decodeStreamSync } from 'toon'
+
+  // Valid streaming options
+  const options: DecodeStreamOptions = {
+    indent: 2,
+    strict: true
+    // expandPaths not available
+  }
+
+  const events = decodeStreamSync(lines, options)
+  ```
+</Accordion>
+
+### ResolvedDecodeOptions
+
+Internal type representing fully resolved decoding options.
+
+```typescript
+type ResolvedDecodeOptions = Readonly<Required<DecodeOptions>>
+```
+
+All fields are present with their default values. This type is used internally and typically not needed in application code.
+
+## Streaming Types
+
+Types for streaming decode operations.
+
+### JsonStreamEvent
+
+Union type representing events emitted by streaming decoders.
+
+```typescript
+type JsonStreamEvent =
+  | { type: 'startObject' }
+  | { type: 'endObject' }
+  | { type: 'startArray', length: number }
+  | { type: 'endArray' }
+  | { type: 'key', key: string, wasQuoted?: boolean }
+  | { type: 'primitive', value: JsonPrimitive }
+```
+
+**Event Types:**
+
+<ParamField path="startObject" type="{ type: 'startObject' }">
+  Signals the beginning of an object. All following `key` events until the matching `endObject` are properties of this object.
+</ParamField>
+
+<ParamField path="endObject" type="{ type: 'endObject' }">
+  Signals the end of an object. Matches the most recent unmatched `startObject`.
+</ParamField>
+
+<ParamField path="startArray" type="{ type: 'startArray', length: number }">
+  Signals the beginning of an array. The `length` property indicates the declared array length from the TOON header.
+</ParamField>
+
+<ParamField path="endArray" type="{ type: 'endArray' }">
+  Signals the end of an array. Matches the most recent unmatched `startArray`.
+</ParamField>
+
+<ParamField path="key" type="{ type: 'key', key: string, wasQuoted?: boolean }">
+  Signals an object property key. The next event (which may be another event like `startObject`) is the value for this key.
+  
+  The optional `wasQuoted` field is `true` if the key was quoted in the TOON source.
+</ParamField>
+
+<ParamField path="primitive" type="{ type: 'primitive', value: JsonPrimitive }">
+  Signals a primitive value (string, number, boolean, or null). The `value` field contains the parsed primitive.
+</ParamField>
+
+<Accordion title="Event Stream Example">
+  ```typescript
+  import { decodeStreamSync } from 'toon'
+
+  const toon = `user:
+    name: Alice
+    age: 30
+    tags[2]: admin, user`
+
+  for (const event of decodeStreamSync(toon.split('\n'))) {
+    console.log(event)
+  }
+
+  // Output:
+  // { type: 'startObject' }
+  // { type: 'key', key: 'user' }
+  // { type: 'startObject' }
+  // { type: 'key', key: 'name' }
+  // { type: 'primitive', value: 'Alice' }
+  // { type: 'key', key: 'age' }
+  // { type: 'primitive', value: 30 }
+  // { type: 'key', key: 'tags' }
+  // { type: 'startArray', length: 2 }
+  // { type: 'primitive', value: 'admin' }
+  // { type: 'primitive', value: 'user' }
+  // { type: 'endArray' }
+  // { type: 'endObject' }
+  // { type: 'endObject' }
+  ```
+</Accordion>
+
+## Internal Types
+
+These types are used internally by the library and are typically not needed in application code.
+
+### ArrayHeaderInfo
+
+Information parsed from a TOON array header line.
+
+```typescript
+interface ArrayHeaderInfo {
+  key?: string
+  length: number
+  delimiter: Delimiter
+  fields?: string[]
+}
+```
+
+<ParamField path="key" type="string | undefined">
+  The optional key name before the array header (e.g., `users` in `users[3]:`).
+</ParamField>
+
+<ParamField path="length" type="number">
+  The declared length of the array (e.g., `3` in `users[3]:`).
+</ParamField>
+
+<ParamField path="delimiter" type="Delimiter">
+  The delimiter used for array values.
+</ParamField>
+
+<ParamField path="fields" type="string[] | undefined">
+  For tabular arrays, the field names (e.g., `['id', 'name', 'email']` in `users[2]{id,name,email}:`).
+</ParamField>
+
+### ParsedLine
+
+Represents a parsed line from TOON input during decoding.
+
+```typescript
+interface ParsedLine {
+  raw: string
+  depth: Depth
+  indent: number
+  content: string
+  lineNumber: number
+}
+```
+
+<ParamField path="raw" type="string">
+  The original line text including indentation.
+</ParamField>
+
+<ParamField path="depth" type="Depth">
+  The computed nesting depth based on indentation.
+</ParamField>
+
+<ParamField path="indent" type="number">
+  The number of spaces of indentation.
+</ParamField>
+
+<ParamField path="content" type="string">
+  The line content with indentation removed.
+</ParamField>
+
+<ParamField path="lineNumber" type="number">
+  The 1-based line number in the input.
+</ParamField>
+
+### BlankLineInfo
+
+Information about a blank line encountered during parsing.
+
+```typescript
+interface BlankLineInfo {
+  lineNumber: number
+  indent: number
+  depth: Depth
+}
+```
+
+Used internally for strict mode validation to detect blank lines within array data.
+
+### Depth
+
+Type alias for representing nesting depth.
+
+```typescript
+type Depth = number
+```
+
+A numeric value representing how deeply nested a structure is. Root level is depth 0.
+
+## Constants
+
+### DELIMITERS
+
+Object containing all available delimiter values.
+
+```typescript
+const DELIMITERS = {
+  comma: ',' as const,
+  tab: '\t' as const,
+  pipe: '|' as const,
+} as const
+```
+
+<Accordion title="Example">
+  ```typescript
+  import { DELIMITERS, encode } from 'toon'
+
+  // Use predefined delimiters
+  encode(data, { delimiter: DELIMITERS.comma })
+  encode(data, { delimiter: DELIMITERS.tab })
+  encode(data, { delimiter: DELIMITERS.pipe })
+  ```
+</Accordion>
+
+### DEFAULT_DELIMITER
+
+The default delimiter used when none is specified.
+
+```typescript
+const DEFAULT_DELIMITER: Delimiter = DELIMITERS.comma // ','
+```
+
+## Type Imports
+
+All types are exported from the main package entry point:
+
+```typescript
+import type {
+  // JSON types
+  JsonPrimitive,
+  JsonObject,
+  JsonArray,
+  JsonValue,
+  
+  // Delimiter types
+  Delimiter,
+  DelimiterKey,
+  
+  // Encoder types
+  EncodeOptions,
+  EncodeReplacer,
+  ResolvedEncodeOptions,
+  
+  // Decoder types
+  DecodeOptions,
+  DecodeStreamOptions,
+  ResolvedDecodeOptions,
+  
+  // Streaming types
+  JsonStreamEvent,
+} from 'toon'
+
+// Constants
+import { DELIMITERS, DEFAULT_DELIMITER } from 'toon'
+```
+
+## See Also
+
+- [EncodeOptions](/api/encode-options) - Detailed encoding options documentation
+- [DecodeOptions](/api/decode-options) - Detailed decoding options documentation
+- [API Reference](/api/encode) - Function API documentation

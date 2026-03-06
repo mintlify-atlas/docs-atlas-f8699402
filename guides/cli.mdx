@@ -1,0 +1,525 @@
+---
+title: 'CLI Usage'
+description: 'Convert between JSON and TOON formats from the command line with token statistics, auto-detection, and pipeline support'
+---
+
+## Overview
+
+The TOON CLI provides a command-line interface for converting between JSON and TOON formats. It supports file I/O, stdin/stdout workflows, auto-detection, token statistics, and comprehensive formatting options.
+
+## Installation
+
+### No Installation (npx)
+
+Run directly with npx:
+
+```bash
+npx @toon-format/cli input.json -o output.toon
+```
+
+### Global Installation
+
+```bash
+# npm
+npm install -g @toon-format/cli
+
+# pnpm
+pnpm add -g @toon-format/cli
+
+# yarn
+yarn global add @toon-format/cli
+```
+
+After installation, use the `toon` command:
+
+```bash
+toon input.json -o output.toon
+```
+
+## Basic Usage
+
+### Auto-Detection
+
+The CLI automatically detects the conversion direction based on file extensions:
+
+```bash
+# JSON → TOON (auto-detected from .json extension)
+npx @toon-format/cli input.json -o output.toon
+
+# TOON → JSON (auto-detected from .toon extension)
+npx @toon-format/cli data.toon -o output.json
+```
+
+### Explicit Mode
+
+Force encoding or decoding mode:
+
+```bash
+# Force encode to TOON
+npx @toon-format/cli input.json --encode
+
+# Force decode to JSON
+npx @toon-format/cli data.toon --decode
+```
+
+### Output to stdout
+
+Omit the `-o` flag to print to stdout:
+
+```bash
+# Print TOON to stdout
+npx @toon-format/cli input.json
+
+# Print JSON to stdout
+npx @toon-format/cli data.toon
+```
+
+### Reading from stdin
+
+Pipe data or use `-` for stdin:
+
+```bash
+# Pipe from another command
+cat data.json | npx @toon-format/cli
+
+# Explicit stdin
+echo '{"name": "Alice", "age": 30}' | npx @toon-format/cli
+
+# Use - for stdin
+npx @toon-format/cli - -o output.toon < input.json
+```
+
+## Command Options
+
+### Flags and Parameters
+
+```bash
+toon [input] [options]
+
+Arguments:
+  input                 Input file path (omit or use "-" for stdin)
+
+Options:
+  -o, --output <path>   Output file path (omit for stdout)
+  -e, --encode          Force encode JSON to TOON
+  -d, --decode          Force decode TOON to JSON
+  --delimiter <char>    Delimiter for arrays: , (comma), \t (tab), | (pipe)
+  --indent <number>     Indentation size (default: 2)
+  --strict <boolean>    Enable strict mode for decoding (default: true)
+  --keyFolding <mode>   Key folding: off, safe (default: off)
+  --flattenDepth <n>    Max folded segments when keyFolding enabled
+  --expandPaths <mode>  Path expansion: off, safe (default: off)
+  --stats               Show token statistics
+  -h, --help            Display help
+  -v, --version         Display version
+```
+
+### Encoding Options
+
+#### Delimiter
+
+Choose delimiter for tabular arrays:
+
+```bash
+# Comma delimiter (default)
+npx @toon-format/cli data.json --delimiter ,
+
+# Tab delimiter (most token-efficient)
+npx @toon-format/cli data.json --delimiter "\t"
+
+# Pipe delimiter
+npx @toon-format/cli data.json --delimiter |
+```
+
+<Note>
+  Tab delimiters reduce token count by ~5-10% compared to commas. Use tabs for LLM input where token efficiency matters most.
+</Note>
+
+#### Indentation
+
+```bash
+# 2-space indent (default)
+npx @toon-format/cli data.json --indent 2
+
+# 4-space indent
+npx @toon-format/cli data.json --indent 4
+```
+
+#### Key Folding
+
+Collapse single-key wrapper chains:
+
+```bash
+# Enable key folding
+npx @toon-format/cli data.json --keyFolding safe
+
+# Limit folding depth
+npx @toon-format/cli data.json --keyFolding safe --flattenDepth 3
+```
+
+**Example:**
+
+```bash
+echo '{"database": {"connection": {"host": "localhost"}}}' | toon --keyFolding safe
+# Output:
+# database.connection:
+#   host: localhost
+```
+
+### Decoding Options
+
+#### Strict Mode
+
+Validate array lengths and field counts:
+
+```bash
+# Strict mode (default)
+npx @toon-format/cli data.toon --strict true
+
+# Lenient mode
+npx @toon-format/cli data.toon --strict false
+```
+
+#### Path Expansion
+
+Expand dotted keys to nested objects:
+
+```bash
+# Enable path expansion (pairs with keyFolding)
+npx @toon-format/cli data.toon --expandPaths safe
+```
+
+**Example:**
+
+```bash
+echo 'database.connection:\n  host: localhost' | toon --decode --expandPaths safe
+# Output:
+# {
+#   "database": {
+#     "connection": {
+#       "host": "localhost"
+#     }
+#   }
+# }
+```
+
+#### Custom Indentation
+
+Match the indentation used during encoding:
+
+```bash
+# Decode with 4-space indent
+npx @toon-format/cli data.toon --indent 4
+```
+
+## Token Statistics
+
+Show token count comparison:
+
+```bash
+npx @toon-format/cli input.json --stats
+```
+
+**Example Output:**
+
+```
+✓ Converted input.json → TOON
+
+Token Statistics:
+  JSON:  1,234 tokens
+  TOON:    856 tokens
+  Saved:   378 tokens (30.6% reduction)
+```
+
+## Pipeline Workflows
+
+### JSON → TOON → File
+
+```bash
+curl https://api.example.com/data | toon > output.toon
+```
+
+### File → TOON → Another Command
+
+```bash
+toon data.json | gzip > compressed.toon.gz
+```
+
+### Round-Trip Conversion
+
+```bash
+# JSON → TOON → JSON
+toon input.json | toon --decode
+
+# Verify lossless conversion
+diff <(cat input.json | jq -S .) <(toon input.json | toon -d | jq -S .)
+```
+
+### Batch Processing
+
+```bash
+# Convert all JSON files in a directory
+for file in *.json; do
+  toon "$file" -o "${file%.json}.toon"
+done
+
+# Convert all TOON files back to JSON
+for file in *.toon; do
+  toon "$file" -o "${file%.toon}.json"
+done
+```
+
+## Real-World Examples
+
+### API Response Optimization
+
+```bash
+# Fetch API data and convert to TOON for LLM input
+curl -s https://api.github.com/repos/facebook/react | \
+  toon --delimiter "\t" --stats
+```
+
+### Database Export
+
+```bash
+# Export database to TOON format
+psql -d mydb -c "SELECT * FROM users" --json | \
+  toon -o users.toon --delimiter "\t"
+```
+
+### Log Processing
+
+```bash
+# Convert JSON logs to compact TOON
+cat logs.json | toon --keyFolding safe > logs.toon
+
+# Parse back to JSON for analysis
+toon logs.toon --expandPaths safe | jq '.[] | select(.level == "error")'
+```
+
+### LLM Prompt Preparation
+
+```bash
+# Prepare data for LLM with maximum token efficiency
+toon dataset.json --delimiter "\t" --keyFolding safe > prompt-data.toon
+
+# Include in prompt
+cat prompt-data.toon | pbcopy  # Copy to clipboard
+```
+
+## Common Patterns
+
+### Quick Format Check
+
+```bash
+# View TOON format without saving
+toon data.json
+
+# Pretty-print JSON from TOON
+toon data.toon | jq .
+```
+
+### Compare Token Counts
+
+```bash
+# Show token savings for multiple delimiters
+echo "Comma delimiter:"
+toon data.json --delimiter , --stats
+
+echo "\nTab delimiter:"
+toon data.json --delimiter "\t" --stats
+
+echo "\nPipe delimiter:"
+toon data.json --delimiter | --stats
+```
+
+### Validation
+
+```bash
+# Check if TOON file is valid
+if toon data.toon --strict true > /dev/null 2>&1; then
+  echo "Valid TOON file"
+else
+  echo "Invalid TOON file"
+fi
+```
+
+### Data Transformation
+
+```bash
+# Encode with key folding, decode without expansion
+toon data.json --keyFolding safe | toon --decode > flattened.json
+
+# Result: JSON with dotted keys instead of nested objects
+```
+
+## Environment Integration
+
+### Shell Scripts
+
+```bash
+#!/bin/bash
+
+# Convert and upload to S3
+toon large-dataset.json --delimiter "\t" | \
+  aws s3 cp - s3://bucket/dataset.toon
+
+# Download and convert back
+aws s3 cp s3://bucket/dataset.toon - | \
+  toon --decode > restored.json
+```
+
+### Makefiles
+
+```makefile
+# Convert all JSON to TOON
+%.toon: %.json
+	toon $< -o $@ --delimiter "\t" --stats
+
+# Convert all TOON to JSON
+%.json: %.toon
+	toon $< -o $@ --expandPaths safe
+
+all: data.toon metrics.toon
+```
+
+### GitHub Actions
+
+```yaml
+name: Convert Data
+on: [push]
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Convert to TOON
+        run: |
+          npx @toon-format/cli data.json -o data.toon --stats
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: toon-data
+          path: data.toon
+```
+
+## Error Handling
+
+### Invalid JSON Input
+
+```bash
+echo '{invalid json}' | toon
+# Error: Failed to parse JSON input
+```
+
+### Invalid TOON Input
+
+```bash
+echo 'users[3]{id,name}:\n  1,Alice' | toon --decode --strict true
+# Error: Expected 3 rows but got 1
+```
+
+### File Not Found
+
+```bash
+toon nonexistent.json
+# Error: Input file not found: nonexistent.json
+```
+
+### Invalid Options
+
+```bash
+toon data.json --delimiter "@"
+# Error: Invalid delimiter "@". Valid delimiters are: comma (,), tab (\t), pipe (|)
+```
+
+## CLI Source Reference
+
+The CLI implementation is available at:
+- **Main command:** [packages/cli/src/index.ts](/home/daytona/workspace/source/packages/cli/src/index.ts)
+- **Conversion logic:** packages/cli/src/conversion.ts
+- **Utilities:** packages/cli/src/utils.ts
+
+<Steps>
+  <Step title="Choose input source">
+    Specify file path, use stdin with `-`, or pipe data directly.
+  </Step>
+  
+  <Step title="Configure format options">
+    Set delimiter, indentation, key folding, and other options.
+  </Step>
+  
+  <Step title="Specify output destination">
+    Use `-o` for file output or omit for stdout.
+  </Step>
+  
+  <Step title="Review token statistics">
+    Add `--stats` flag to see token savings.
+  </Step>
+</Steps>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use tabs for LLM input" icon="minimize">
+    Add `--delimiter "\t"` for maximum token efficiency.
+  </Card>
+  
+  <Card title="Enable key folding" icon="compress">
+    Use `--keyFolding safe` for nested structures to reduce tokens further.
+  </Card>
+  
+  <Card title="Check token savings" icon="chart-line">
+    Add `--stats` to quantify token reduction.
+  </Card>
+  
+  <Card title="Validate round-trips" icon="rotate">
+    Test that encoding + decoding preserves data integrity.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Command Not Found
+
+```bash
+# Use npx if not installed globally
+npx @toon-format/cli --version
+
+# Or install globally
+npm install -g @toon-format/cli
+```
+
+### Permission Denied
+
+```bash
+# Ensure output directory is writable
+chmod +w output-directory/
+
+# Or write to home directory
+toon data.json -o ~/output.toon
+```
+
+### Large Files Timeout
+
+```bash
+# Increase Node.js memory limit
+NODE_OPTIONS="--max-old-space-size=4096" toon large-file.json
+```
+
+## Next Steps
+
+<Card title="Encoding Guide" icon="arrow-right" href="/guides/encoding">
+  Learn programmatic encoding with the TypeScript SDK
+</Card>
+
+<Card title="Streaming" icon="arrow-right" href="/guides/streaming">
+  Process large files with streaming APIs
+</Card>
+
+<Card title="LLM Integration" icon="arrow-right" href="/guides/llm-integration">
+  Use TOON format effectively with Large Language Models
+</Card>

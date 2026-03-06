@@ -1,97 +1,200 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "TOON - Token-Oriented Object Notation"
+description: "Compact, human-readable JSON encoding optimized for LLM prompts"
 ---
 
-## Setting up
+<div style={{
+  background: 'linear-gradient(135deg, #f7efc0 0%, #948c74 100%)',
+  borderRadius: '16px',
+  padding: '48px 32px',
+  marginBottom: '32px',
+  textAlign: 'center'
+}}>
+  <h1 style={{
+    fontSize: '48px',
+    fontWeight: '700',
+    color: '#1f1f1f',
+    marginBottom: '16px',
+    fontFamily: 'Inter'
+  }}>
+    Token-Oriented Object Notation
+  </h1>
+  <p style={{
+    fontSize: '20px',
+    color: '#2E2E2E',
+    maxWidth: '800px',
+    margin: '0 auto 24px',
+    fontFamily: 'Inter'
+  }}>
+    TOON is a compact, human-readable encoding of JSON optimized for LLM prompts. Save up to 40% on tokens while maintaining 100% lossless conversion.
+  </p>
+  <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+    <a href="/quickstart" style={{
+      background: '#b0650a',
+      color: '#ffffff',
+      padding: '12px 24px',
+      borderRadius: '16px',
+      textDecoration: 'none',
+      fontWeight: '700',
+      fontSize: '16px',
+      fontFamily: 'Inter'
+    }}>
+      Get Started
+    </a>
+    <a href="/concepts/what-is-toon" style={{
+      background: '#e6e6ea',
+      color: '#4a4a4a',
+      padding: '12px 24px',
+      borderRadius: '16px',
+      textDecoration: 'none',
+      fontWeight: '700',
+      fontSize: '16px',
+      fontFamily: 'Inter'
+    }}>
+      Learn More
+    </a>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+## Why TOON?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+LLM tokens cost money, and standard JSON is verbose. TOON combines YAML-like indentation with CSV-style tabular arrays to minimize token usage while remaining perfectly readable and maintaining full JSON compatibility.
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={3}>
+  <Card title="Token Efficient" icon="gauge-high">
+    Save ~40% tokens compared to formatted JSON while achieving 76.4% accuracy vs JSON's 75%
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Lossless" icon="arrows-rotate">
+    100% bidirectional conversion between JSON and TOON with deterministic round-trips
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="LLM-Friendly" icon="brain">
+    Explicit length declarations and field headers provide clear schema guardrails
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Quick Example
 
-Everything you need to create world-class documentation.
+Transform verbose JSON into compact TOON format:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<CodeGroup>
 
-## Need inspiration?
+```json JSON (75 tokens)
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Alice",
+      "role": "admin"
+    },
+    {
+      "id": 2,
+      "name": "Bob",
+      "role": "user"
+    }
+  ]
+}
+```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+```yaml TOON (29 tokens)
+users[2]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user
+```
+
+</CodeGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="TypeScript SDK" icon="code" href="/api/encode">
+    Full-featured encode/decode APIs with TypeScript types
+  </Card>
+  <Card title="Streaming Support" icon="stream" href="/guides/streaming">
+    Memory-efficient processing for large datasets
+  </Card>
+  <Card title="CLI Tool" icon="terminal" href="/guides/cli">
+    Quick conversions and token analysis from command line
+  </Card>
+  <Card title="Benchmarks" icon="chart-line" href="/advanced/benchmarks">
+    Proven 76.4% accuracy across 4 LLMs and 209 test questions
+  </Card>
+</CardGroup>
+
+## Get Started
+
+<Steps>
+  <Step title="Install the package">
+    <CodeGroup>
+    ```bash npm
+    npm install @toon-format/toon
+    ```
+    ```bash pnpm
+    pnpm add @toon-format/toon
+    ```
+    ```bash yarn
+    yarn add @toon-format/toon
+    ```
+    </CodeGroup>
+  </Step>
+  
+  <Step title="Encode your first data">
+    ```typescript
+    import { encode } from '@toon-format/toon'
+
+    const data = {
+      users: [
+        { id: 1, name: 'Alice', role: 'admin' },
+        { id: 2, name: 'Bob', role: 'user' }
+      ]
+    }
+
+    console.log(encode(data))
+    // users[2]{id,name,role}:
+    //   1,Alice,admin
+    //   2,Bob,user
+    ```
+  </Step>
+  
+  <Step title="Decode back to JSON">
+    ```typescript
+    import { decode } from '@toon-format/toon'
+
+    const toon = `users[2]{id,name,role}:
+      1,Alice,admin
+      2,Bob,user`
+
+    const result = decode(toon)
+    // { users: [{ id: 1, name: 'Alice', role: 'admin' }, ...] }
+    ```
+  </Step>
+</Steps>
+
+## When to Use TOON
+
+TOON excels with uniform arrays of objects, making it ideal for:
+
+- 📊 **Tabular data** with consistent structure (employee records, analytics, logs)
+- 🤖 **LLM prompts** where token efficiency matters
+- 📈 **Time-series data** with repeated field patterns
+- 🔄 **Data pipelines** requiring lossless JSON transformation
+
+<Note>
+For deeply nested or non-uniform structures, compact JSON may be more efficient. See [When to Use](/concepts/when-to-use) for detailed guidance.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  <Card title="Format Overview" icon="book" href="/concepts/format-overview">
+    Learn TOON syntax and structure
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/encode">
+    Explore all encode/decode functions
+  </Card>
+  <Card title="LLM Integration" icon="brain" href="/guides/llm-integration">
+    Use TOON with Claude, GPT, and other models
+  </Card>
+</CardGroup>

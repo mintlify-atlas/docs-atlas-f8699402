@@ -1,0 +1,548 @@
+---
+title: "decodeStream"
+description: "Asynchronously decode TOON lines into a stream of JSON events"
+---
+
+## Overview
+
+`decodeStream` converts TOON-formatted lines into a stream of structured JSON events without building the complete value tree in memory. This async variant supports both synchronous and asynchronous line sources, making it ideal for file streams, network responses, or any async data source.
+
+<Note>
+This function accepts both async and sync iterables and always returns an async iterable. For purely synchronous sources, you can use [`decodeStreamSync`](/api/decode-stream-sync) for better performance.
+</Note>
+
+## Function Signature
+
+```typescript
+function decodeStream(
+  source: AsyncIterable<string> | Iterable<string>,
+  options?: DecodeStreamOptions
+): AsyncIterable<JsonStreamEvent>
+```
+
+## Parameters
+
+<ParamField path="source" type="AsyncIterable<string> | Iterable<string>" required>
+  An iterable of TOON lines (without trailing newlines). Accepts:
+  - Async iterables (e.g., `ReadableStream`, async generators)
+  - Sync iterables (e.g., arrays, sync generators)
+</ParamField>
+
+<ParamField path="options" type="DecodeStreamOptions">
+  Optional configuration object for decoding behavior.
+
+  <ParamField path="indent" type="number" default={2}>
+    Number of spaces per indentation level. Must match the indentation used in the TOON input.
+  </ParamField>
+
+  <ParamField path="strict" type="boolean" default={true}>
+    When `true`, enforces strict validation of array lengths, tabular row counts, and blank line restrictions.
+  </ParamField>
+</ParamField>
+
+<Warning>
+**Path expansion not supported**: The `expandPaths` option from [`decode()`](/api/decode) is not available in streaming mode. Streaming decoders emit raw events without post-processing transformations.
+</Warning>
+
+## Return Value
+
+<ResponseField name="events" type="AsyncIterable<JsonStreamEvent>">
+  An async iterable that yields JSON stream events. Each event represents a structural element of the JSON data model.
+</ResponseField>
+
+## Event Types
+
+The decoder emits six types of events:
+
+<ResponseField name="startObject" type='{ type: "startObject" }'>
+  Marks the beginning of a JSON object.
+</ResponseField>
+
+<ResponseField name="endObject" type='{ type: "endObject" }'>
+  Marks the end of a JSON object.
+</ResponseField>
+
+<ResponseField name="startArray" type='{ type: "startArray", length: number }'>
+  Marks the beginning of a JSON array. The `length` field indicates the declared array length from the TOON header.
+</ResponseField>
+
+<ResponseField name="endArray" type='{ type: "endArray" }'>
+  Marks the end of a JSON array.
+</ResponseField>
+
+<ResponseField name="key" type='{ type: "key", key: string, wasQuoted?: boolean }'>
+  Represents an object key. The optional `wasQuoted` field is `true` when the key was quoted in the TOON source.
+</ResponseField>
+
+<ResponseField name="primitive" type='{ type: "primitive", value: JsonPrimitive }'>
+  Represents a primitive value (string, number, boolean, or null).
+</ResponseField>
+
+## Usage Examples
+
+### Async File Stream Processing
+
+Process large TOON files line-by-line without loading into memory:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+import { createReadStream } from 'fs'
+import { createInterface } from 'readline'
+
+async function processLargeFile(filePath: string) {
+  const fileStream = createReadStream(filePath, 'utf-8')
+  const lineReader = createInterface({
+    input: fileStream,
+    crlfDelay: Infinity
+  })
+
+  // lineReader is an async iterable of lines
+  for await (const event of decodeStream(lineReader)) {
+    if (event.type === 'primitive') {
+      console.log('Found value:', event.value)
+    }
+  }
+}
+
+await processLargeFile('large-data.toon')
+```
+
+### HTTP Response Streaming
+
+Decode TOON data from a streaming HTTP response:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function fetchAndDecode(url: string) {
+  const response = await fetch(url)
+  
+  if (!response.body) {
+    throw new Error('No response body')
+  }
+
+  // Convert ReadableStream to async iterable of lines
+  const reader = response.body.pipeThrough(new TextDecoderStream())
+  const lines = splitStreamIntoLines(reader) // Helper to split on \n
+
+  for await (const event of decodeStream(lines)) {
+    console.log(event)
+  }
+}
+
+await fetchAndDecode('https://api.example.com/data.toon')
+```
+
+### Async Generator Source
+
+Use with async generators for custom data sources:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function* fetchLinesFromAPI() {
+  const response = await fetch('https://api.example.com/stream')
+  const data = await response.text()
+  
+  for (const line of data.split('\n')) {
+    yield line
+    await new Promise(resolve => setTimeout(resolve, 10)) // Simulate async delay
+  }
+}
+
+const events = decodeStream(fetchLinesFromAPI())
+
+for await (const event of events) {
+  console.log(event)
+}
+```
+
+### Progressive Data Processing
+
+Build and emit partial results as data arrives:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function* progressiveProcessor(lines: AsyncIterable<string>) {
+  let objectCount = 0
+  let arrayCount = 0
+
+  for await (const event of decodeStream(lines)) {
+    if (event.type === 'startObject') {
+      objectCount++
+    } else if (event.type === 'startArray') {
+      arrayCount++
+    }
+
+    // Emit progress updates
+    if (event.type === 'endObject' || event.type === 'endArray') {
+      yield { objects: objectCount, arrays: arrayCount }
+    }
+  }
+}
+
+for await (const progress of progressiveProcessor(asyncLineSource)) {
+  console.log(`Progress: ${progress.objects} objects, ${progress.arrays} arrays`)
+}
+```
+
+### Sync Source Compatibility
+
+Works seamlessly with synchronous sources too:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+const lines = [
+  'name: Alice',
+  'age: 30',
+  'role: admin'
+]
+
+// Sync array works with async function
+for await (const event of decodeStream(lines)) {
+  console.log(event)
+}
+```
+
+### Building Values from Events
+
+Reconstruct the full value tree from events:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function buildValue(source: AsyncIterable<string>) {
+  const stack: any[] = []
+  let current: any = null
+  let currentKey: string | null = null
+
+  for await (const event of decodeStream(source)) {
+    switch (event.type) {
+      case 'startObject':
+        const obj = {}
+        if (currentKey !== null) {
+          current[currentKey] = obj
+          stack.push(current)
+          current = obj
+          currentKey = null
+        } else {
+          current = obj
+        }
+        break
+
+      case 'startArray':
+        const arr: any[] = []
+        if (currentKey !== null) {
+          current[currentKey] = arr
+          stack.push(current)
+          current = arr
+          currentKey = null
+        } else {
+          current = arr
+        }
+        break
+
+      case 'key':
+        currentKey = event.key
+        break
+
+      case 'primitive':
+        if (Array.isArray(current)) {
+          current.push(event.value)
+        } else if (currentKey !== null) {
+          current[currentKey] = event.value
+          currentKey = null
+        }
+        break
+
+      case 'endObject':
+      case 'endArray':
+        if (stack.length > 0) {
+          current = stack.pop()
+        }
+        break
+    }
+  }
+
+  return current
+}
+
+const result = await buildValue(asyncLineSource)
+console.log(result)
+```
+
+<Note>
+For standard value reconstruction, use [`decodeFromLines()`](/api/decode-from-lines) which handles this automatically and supports path expansion.
+</Note>
+
+### Error Handling with Async Sources
+
+Handle errors gracefully in async streaming contexts:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function safeStreamDecode(source: AsyncIterable<string>) {
+  try {
+    for await (const event of decodeStream(source)) {
+      console.log(event)
+      
+      // Check for specific conditions
+      if (event.type === 'startArray' && event.length > 10000) {
+        console.warn('Large array detected:', event.length)
+      }
+    }
+  } catch (error) {
+    console.error('Decode error:', error.message)
+    // Handle parse errors, invalid syntax, etc.
+  }
+}
+
+await safeStreamDecode(asyncLineSource)
+```
+
+### Early Termination
+
+Stop processing when a condition is met:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function findFirstMatch(
+  source: AsyncIterable<string>,
+  targetKey: string
+) {
+  let inTargetKey = false
+
+  for await (const event of decodeStream(source)) {
+    if (event.type === 'key' && event.key === targetKey) {
+      inTargetKey = true
+    } else if (inTargetKey && event.type === 'primitive') {
+      return event.value // Found it, stop iterating
+    }
+  }
+
+  return null
+}
+
+const value = await findFirstMatch(asyncLines, 'userId')
+console.log('User ID:', value)
+```
+
+## Sync vs Async Variants
+
+Key differences between `decodeStream` and `decodeStreamSync`:
+
+<CardGroup cols={2}>
+  <Card title="decodeStream" icon="arrows-rotate">
+    - Accepts async or sync sources
+    - Returns `AsyncIterable`
+    - Use `for await...of` loop
+    - Ideal for I/O operations
+  </Card>
+  <Card title="decodeStreamSync" icon="gauge-high">
+    - Accepts only sync sources
+    - Returns `Iterable`
+    - Use `for...of` loop
+    - Better performance for sync data
+  </Card>
+</CardGroup>
+
+```typescript
+// Async variant
+for await (const event of decodeStream(asyncSource)) {
+  // Process event
+}
+
+// Sync variant
+for (const event of decodeStreamSync(syncSource)) {
+  // Process event
+}
+```
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Memory Efficient" icon="memory">
+    Processes data incrementally without loading the entire structure into memory.
+  </Card>
+  <Card title="Backpressure Handling" icon="wave-square">
+    Respects async iterator backpressure for controlled resource usage.
+  </Card>
+  <Card title="Lazy Evaluation" icon="hourglass">
+    Events are generated on-demand as you iterate, enabling early termination.
+  </Card>
+  <Card title="I/O Optimized" icon="bolt">
+    Designed for file streams, network responses, and other async sources.
+  </Card>
+</CardGroup>
+
+## Custom Options
+
+Configure indentation and validation:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+// 4-space indentation
+const events1 = decodeStream(source, { indent: 4 })
+
+// Disable strict validation
+const events2 = decodeStream(source, { strict: false })
+
+// Both options
+const events3 = decodeStream(source, {
+  indent: 4,
+  strict: false
+})
+
+for await (const event of events3) {
+  console.log(event)
+}
+```
+
+## Streaming from Network
+
+Real-world example with fetch and stream processing:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function* readLinesFromResponse(response: Response) {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    
+    if (done) {
+      if (buffer) yield buffer
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      yield line
+    }
+  }
+}
+
+async function processRemoteToon(url: string) {
+  const response = await fetch(url)
+  const lines = readLinesFromResponse(response)
+  
+  let itemCount = 0
+  
+  for await (const event of decodeStream(lines)) {
+    if (event.type === 'startArray') {
+      console.log(`Processing array of ${event.length} items`)
+    }
+    if (event.type === 'primitive') {
+      itemCount++
+    }
+  }
+  
+  console.log(`Total primitives: ${itemCount}`)
+}
+
+await processRemoteToon('https://example.com/data.toon')
+```
+
+## Error Handling
+
+Comprehensive error handling patterns:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+
+async function robustDecode(source: AsyncIterable<string>) {
+  const results: any[] = []
+  let errorCount = 0
+
+  try {
+    for await (const event of decodeStream(source)) {
+      if (event.type === 'primitive') {
+        results.push(event.value)
+      }
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      console.error('Invalid TOON syntax:', error.message)
+      errorCount++
+    } else if (error instanceof ReferenceError) {
+      console.error('Unexpected structure:', error.message)
+      errorCount++
+    } else {
+      throw error // Re-throw unknown errors
+    }
+  }
+
+  return { results, errorCount }
+}
+
+const { results, errorCount } = await robustDecode(asyncSource)
+console.log(`Decoded ${results.length} items with ${errorCount} errors`)
+```
+
+## Related Functions
+
+<CardGroup cols={2}>
+  <Card title="decodeStreamSync" icon="gauge-high" href="/api/decode-stream-sync">
+    Synchronous variant for sync-only sources with better performance
+  </Card>
+  <Card title="decodeFromLines" icon="list" href="/api/decode-from-lines">
+    Decode lines directly to a value (supports path expansion)
+  </Card>
+  <Card title="decode" icon="brackets-curly" href="/api/decode">
+    Standard decoder that builds the complete value tree
+  </Card>
+  <Card title="Streaming Guide" icon="book" href="/guides/streaming">
+    Complete guide to streaming with TOON
+  </Card>
+</CardGroup>
+
+## Type Definitions
+
+```typescript
+type JsonStreamEvent
+  = | { type: 'startObject' }
+    | { type: 'endObject' }
+    | { type: 'startArray', length: number }
+    | { type: 'endArray' }
+    | { type: 'key', key: string, wasQuoted?: boolean }
+    | { type: 'primitive', value: JsonPrimitive }
+
+type JsonPrimitive = string | number | boolean | null
+
+interface DecodeStreamOptions {
+  indent?: number      // Default: 2
+  strict?: boolean     // Default: true
+  expandPaths?: never  // Not supported in streaming mode
+}
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Choose the right variant">
+    Use `decodeStream` for async sources (files, network), `decodeStreamSync` for sync arrays/generators
+  </Step>
+
+  <Step title="Handle backpressure">
+    Process events as they arrive rather than buffering to maintain memory efficiency
+  </Step>
+
+  <Step title="Validate early">
+    Check event types and values as you process them to fail fast on invalid data
+  </Step>
+
+  <Step title="Clean up resources">
+    Use try-finally blocks to ensure async iterators are properly closed
+  </Step>
+</Steps>

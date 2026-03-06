@@ -1,0 +1,610 @@
+---
+title: Format Overview
+description: Complete TOON syntax reference with examples for objects, arrays, primitives, and advanced features
+---
+
+# Format Overview
+
+TOON syntax reference with concrete examples. This page covers the complete format specification.
+
+## Data Model
+
+TOON models data the same way as JSON:
+
+- **Primitives**: strings, numbers, booleans, and `null`
+- **Objects**: mappings from string keys to values
+- **Arrays**: ordered sequences of values
+
+<Note>
+  TOON is **fully lossless**: `decode(encode(x))` always equals `x` after normalization of non-JSON types like `Date`, `NaN`, etc.
+</Note>
+
+## Root Forms
+
+A TOON document can represent three root forms:
+
+<Accordion title="Root Object (Most Common)">
+  Fields appear at depth 0 with no parent key:
+
+  ```yaml
+  id: 123
+  name: Ada
+  active: true
+  ```
+
+  This is the most common form for structured data.
+</Accordion>
+
+<Accordion title="Root Array">
+  Begins with `[N]:` or `[N]{fields}:` at depth 0:
+
+  ```yaml
+  [3]{id,name}:
+    1,Alice
+    2,Bob
+    3,Carol
+  ```
+
+  Or for primitive arrays:
+
+  ```yaml
+  [3]: x,y,z
+  ```
+</Accordion>
+
+<Accordion title="Root Primitive">
+  A single primitive value:
+
+  ```yaml
+  42
+  ```
+
+  Or:
+
+  ```yaml
+  Hello World
+  ```
+</Accordion>
+
+## Objects
+
+### Simple Objects
+
+Objects with primitive values use `key: value` syntax, one field per line:
+
+```yaml
+id: 123
+name: Ada
+active: true
+salary: 75000
+```
+
+**Syntax rules:**
+- One space follows the colon
+- Indentation replaces braces
+- Keys are unquoted when safe (see [Quoting Rules](#quoting-rules))
+
+### Nested Objects
+
+Nested objects add one indentation level (default: 2 spaces):
+
+```yaml
+user:
+  id: 123
+  name: Ada
+  profile:
+    email: ada@example.com
+    active: true
+```
+
+<Info>
+  When a key ends with `:` and has no value on the same line, it opens a nested object. All lines at the next indentation level belong to that object.
+</Info>
+
+### Empty Objects
+
+An empty object at the root yields an empty document (no lines). A nested empty object is `key:` alone, with no children:
+
+```yaml
+data:
+status: ready
+```
+
+This represents `{ "data": {}, "status": "ready" }`.
+
+## Arrays
+
+TOON detects array structure and chooses the most efficient representation. **Arrays always declare their length in brackets: `[N]`**.
+
+### Primitive Arrays (Inline)
+
+Arrays of primitives render inline:
+
+<CodeGroup>
+```yaml Strings
+tags[3]: admin,ops,dev
+```
+
+```yaml Numbers
+scores[4]: 95,87,92,88
+```
+
+```yaml Booleans
+flags[3]: true,false,true
+```
+
+```yaml Mixed Primitives
+values[4]: 42,hello,true,null
+```
+</CodeGroup>
+
+<Warning>
+  Strings containing the active delimiter (comma by default) must be quoted:
+  
+  ```yaml
+  names[2]: "Smith, John","Doe, Jane"
+  ```
+</Warning>
+
+### Tabular Arrays (Uniform Objects)
+
+When all objects in an array share the same set of primitive-valued keys, TOON uses tabular format:
+
+```yaml
+items[2]{sku,qty,price}:
+  A1,2,9.99
+  B2,1,14.5
+```
+
+**Header breakdown:**
+- `items` — Array key name
+- `[2]` — Array length (2 rows)
+- `{sku,qty,price}` — Field names
+- `:` — Opens the array body
+
+**Each row:**
+- Values in the same order as field list
+- Separated by the active delimiter (comma by default)
+- Encoded as primitives (strings, numbers, booleans, `null`)
+
+<Accordion title="Tabular Requirements">
+  An array qualifies for tabular format when:
+
+  1. All elements are objects
+  2. All objects have identical field sets (same keys, any order)
+  3. All values are primitives (no nested arrays/objects)
+
+  If any condition fails, TOON uses list format instead.
+</Accordion>
+
+#### Complex Tabular Example
+
+Here's a realistic example with various data types:
+
+```yaml
+employees[3]{id,name,department,salary,active,startDate}:
+  1,Alice Johnson,Engineering,95000,true,2023-01-15
+  2,Bob Smith,Sales,72000,true,2022-08-20
+  3,Carol White,Engineering,88000,false,2021-03-10
+```
+
+This includes:
+- Numbers: `id`, `salary`
+- Strings: `name`, `department`, `startDate`
+- Booleans: `active`
+
+### Non-Uniform Arrays (List Format)
+
+Arrays that don't meet tabular requirements use list format with hyphen markers:
+
+```yaml
+items[3]:
+  - 1
+  - a: 1
+  - text
+```
+
+Each element starts with `- ` at one indentation level deeper than the parent array header.
+
+#### Objects as List Items
+
+When array elements are objects:
+
+```yaml
+items[2]:
+  - id: 1
+    name: First
+  - id: 2
+    name: Second
+    extra: true
+```
+
+Notice the second object has an additional `extra` field—this non-uniformity requires list format.
+
+### Arrays of Arrays
+
+When you have arrays containing primitive inner arrays:
+
+```yaml
+pairs[2]:
+  - [2]: 1,2
+  - [2]: 3,4
+```
+
+Each inner array gets its own header on the list-item line.
+
+**Nested uniform objects:**
+
+```yaml
+groups[2]:
+  - name: Team A
+    members[2]{id,name}:
+      1,Alice
+      2,Bob
+  - name: Team B
+    members[2]{id,name}:
+      3,Carol
+      4,Dave
+```
+
+### Empty Arrays
+
+Empty arrays declare length zero with no elements:
+
+```yaml
+items[0]:
+```
+
+No indented lines follow the header.
+
+## Array Headers
+
+### Header Syntax
+
+Array headers follow this pattern:
+
+```
+key[N<delimiter?>]<{fields}>:
+```
+
+Where:
+- **N** — Non-negative integer length
+- **delimiter** (optional) — Explicitly declares the active delimiter
+- **fields** (optional) — For tabular arrays: `{field1,field2,field3}`
+
+<Tip>
+  The array length `[N]` helps LLMs validate structure. If you ask a model to generate TOON output, explicit lengths let you detect truncation or malformed data.
+</Tip>
+
+### Delimiter Options
+
+TOON supports three delimiters:
+
+<Accordion title="Comma (Default)">
+  The comma is the default delimiter and requires no special declaration:
+
+  ```yaml
+  items[2]{sku,name,qty}:
+    A1,Widget,2
+    B2,Gadget,1
+  ```
+
+  Strings containing commas must be quoted:
+
+  ```yaml
+  items[2]{sku,desc}:
+    A1,"Widget, deluxe"
+    B2,"Gadget, basic"
+  ```
+</Accordion>
+
+<Accordion title="Tab Delimiter">
+  Declare tab with `\t` inside brackets:
+
+  ```yaml
+  items[2\t]{sku\tname\tqty}:
+    A1\tWidget\t2
+    B2\tGadget\t1
+  ```
+
+  **Benefits:**
+  - Often tokenizes more efficiently than commas
+  - Strings with commas don't need quoting
+  - Better for data with many punctuation marks
+
+  **Usage:**
+  ```typescript
+  encode(data, { delimiter: '\t' })
+  ```
+</Accordion>
+
+<Accordion title="Pipe Delimiter">
+  Declare pipe with `|` inside brackets:
+
+  ```yaml
+  items[2|]{sku|name|qty}:
+    A1|Widget|2
+    B2|Gadget|1
+  ```
+
+  **Benefits:**
+  - Visual separation without quoting commas or tabs
+  - Useful for data that naturally contains both commas and tabs
+
+  **Usage:**
+  ```typescript
+  encode(data, { delimiter: '|' })
+  ```
+</Accordion>
+
+<Info>
+  **Delimiter scoping**: The delimiter is scoped to the array header that declares it. Nested arrays can use different delimiters.
+</Info>
+
+## Quoting Rules
+
+### When Strings Need Quotes
+
+TOON quotes strings **only when necessary** to maximize token efficiency. A string must be quoted if it:
+
+1. Is empty (`""`)
+2. Has leading or trailing whitespace
+3. Equals `true`, `false`, or `null` (case-sensitive)
+4. Looks like a number (e.g., `"42"`, `"-3.14"`, `"1e-6"`, `"05"`)
+5. Contains special characters: `:`, `"`, `\`, `[`, `]`, `{`, `}`, newline, tab, carriage return
+6. Contains the active delimiter
+7. Equals `"-"` or starts with `"-"` followed by any character
+
+<Accordion title="Examples: When to Quote">
+  ```yaml
+  # Must quote - looks like a number
+  version: "123"
+  
+  # Must quote - looks like a boolean
+  status: "true"
+  
+  # Must quote - contains comma (active delimiter)
+  note: "hello, world"
+  
+  # Must quote - leading/trailing spaces
+  message: " padded "
+  
+  # Must quote - empty string
+  name: ""
+  
+  # Must quote - contains colon
+  url: "http://example.com"
+  
+  # No quotes needed - unambiguous string
+  name: Alice
+  
+  # No quotes needed - unicode and emoji are safe
+  message: Hello 世界 👋
+  
+  # No quotes needed - internal spaces are safe
+  note: This has inner spaces
+  ```
+</Accordion>
+
+### Escape Sequences
+
+In quoted strings and keys, only five escape sequences are valid:
+
+| Character | Escape | Example |
+|-----------|--------|--------|
+| Backslash (`\`) | `\\` | `"path\\to\\file"` |
+| Double quote (`"`) | `\"` | `"She said \"hello\""` |
+| Newline (U+000A) | `\n` | `"line1\nline2"` |
+| Carriage return (U+000D) | `\r` | `"text\r\n"` |
+| Tab (U+0009) | `\t` | `"col1\tcol2"` |
+
+<Warning>
+  All other escape sequences (e.g., `\x`, `\u`, `\0`) are **invalid** and will cause an error in strict mode.
+</Warning>
+
+## Type Conversions
+
+TOON normalizes non-JSON types before encoding:
+
+### Numbers
+
+Numbers are emitted in canonical decimal form:
+
+```typescript
+// Input → Output
+1e6      → 1000000
+1.5000   → 1.5
+-0       → 0
+42.0     → 42
+```
+
+<Info>
+  Decoders accept both decimal and exponent forms on input (`42`, `-3.14`, `1e-6`).
+</Info>
+
+### Special Values
+
+| Input | Output |
+|-------|--------|
+| `NaN` | `null` |
+| `Infinity` | `null` |
+| `-Infinity` | `null` |
+| `undefined` | `null` |
+| `function` | `null` |
+| `symbol` | `null` |
+
+### BigInt
+
+```typescript
+// Within safe range → Number
+9007199254740991n → 9007199254740991
+
+// Out of range → Quoted decimal string
+9007199254740993n → "9007199254740993"
+```
+
+### Date Objects
+
+Date objects serialize to ISO 8601 strings:
+
+```typescript
+new Date('2025-01-01') → "2025-01-01T00:00:00.000Z"
+```
+
+### Custom Serialization with toJSON
+
+Objects with a `toJSON()` method are serialized by calling the method:
+
+```typescript
+const obj = {
+  data: 'example',
+  toJSON() {
+    return { info: this.data }
+  }
+}
+
+encode(obj)
+// info: example
+```
+
+## Key Folding (Optional)
+
+Key folding is an optional encoder feature that collapses chains of single-key objects into dotted paths.
+
+### Basic Folding
+
+**Standard nesting:**
+```yaml
+data:
+  metadata:
+    items[2]: a,b
+```
+
+**With key folding** (`keyFolding: 'safe'`):
+```yaml
+data.metadata.items[2]: a,b
+```
+
+The three nested objects collapse into a single dotted key `data.metadata.items`.
+
+### When Folding Applies
+
+A chain of objects is foldable when:
+- Each object in the chain has exactly one key
+- The leaf value is a primitive, array, or empty object
+- All segments are valid identifiers: `^[A-Za-z_][A-Za-z0-9_]*$`
+- No segment requires quoting
+- The resulting key doesn't collide with existing keys
+
+<Accordion title="Folding Examples">
+  **Foldable:**
+  ```typescript
+  { user: { profile: { email: 'ada@example.com' } } }
+  // → user.profile.email: ada@example.com
+  ```
+
+  **Not foldable (branch):**
+  ```typescript
+  { user: { name: 'Ada', role: 'admin' } }
+  // → user:
+  //     name: Ada
+  //     role: admin
+  ```
+
+  **Not foldable (invalid segment):**
+  ```typescript
+  { 'my-data': { value: 42 } }
+  // → my-data:
+  //     value: 42
+  ```
+</Accordion>
+
+### Round-Trip with Path Expansion
+
+When decoding TOON that used key folding, enable path expansion to restore the nested structure:
+
+```typescript
+import { decode, encode } from '@toon-format/toon'
+
+const original = { data: { metadata: { items: ['a', 'b'] } } }
+
+// Encode with folding
+const toon = encode(original, { keyFolding: 'safe' })
+// → "data.metadata.items[2]: a,b"
+
+// Decode with expansion
+const restored = decode(toon, { expandPaths: 'safe' })
+// → { data: { metadata: { items: ['a', 'b'] } } }
+```
+
+<Warning>
+  Path expansion is **off by default**, so dotted keys are treated as literal keys unless explicitly enabled.
+</Warning>
+
+## Advanced Features
+
+### Tabular Header on List Items
+
+When a list-item object has a tabular array as its first field, the tabular header appears on the hyphen line:
+
+```yaml
+items[2]:
+  - users[2]{id,name}:
+      1,Ada
+      2,Bob
+    status: active
+  - users[1]{id,name}:
+      3,Carol
+    status: inactive
+```
+
+**Indentation:**
+- Tabular rows: Two levels deeper than hyphen
+- Other fields: One level deeper than hyphen
+
+### Custom Indentation
+
+The default indentation is 2 spaces, but you can customize it:
+
+```typescript
+encode(data, { indent: 4 })
+```
+
+### Streaming Large Datasets
+
+For memory-efficient processing of large datasets:
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+
+const largeData = await fetchThousandsOfRecords()
+
+// Memory-efficient streaming
+for (const line of encodeLines(largeData)) {
+  process.stdout.write(`${line}\n`)
+}
+```
+
+<Tip>
+  For streaming decode APIs, see [`decodeFromLines()`](/api/decode-from-lines) and [`decodeStream()`](/api/decode-stream).
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="When to Use TOON" icon="compass" href="/concepts/when-to-use">
+    Learn when TOON excels and when to use alternatives
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install the library and start encoding your data
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/encode">
+    Explore encoding and decoding options
+  </Card>
+  
+  <Card title="Advanced Options" icon="list-check" href="/advanced/options">
+    Configuration options and fine-tuning
+  </Card>
+</CardGroup>

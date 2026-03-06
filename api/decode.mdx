@@ -1,0 +1,131 @@
+---
+title: "decode"
+description: "Decodes a TOON format string into a JavaScript value"
+---
+
+## Function Signature
+
+```typescript
+function decode(input: string, options?: DecodeOptions): JsonValue
+```
+
+Decodes a TOON format string into a JavaScript value.
+
+## Parameters
+
+<ParamField path="input" type="string" required>
+  TOON formatted string to decode.
+</ParamField>
+
+<ParamField path="options" type="DecodeOptions">
+  Optional decoding configuration.
+
+  <ParamField path="indent" type="number" default="2">
+    Number of spaces per indentation level. Must match the indentation used when encoding.
+  </ParamField>
+
+  <ParamField path="strict" type="boolean" default="true">
+    When `true`, enforce strict validation of array lengths and tabular row counts.
+  </ParamField>
+
+  <ParamField path="expandPaths" type="'off' | 'safe'" default="'off'">
+    Enable path expansion to reconstruct dotted keys into nested objects. When set to `'safe'`, keys containing dots are expanded into nested structures if all segments are valid identifiers (e.g., `data.metadata.items` becomes nested objects). Pairs with `keyFolding='safe'` for lossless round-trips.
+  </ParamField>
+</ParamField>
+
+## Returns
+
+<ResponseField name="result" type="JsonValue">
+  Parsed JavaScript value (object, array, or primitive).
+
+  ```typescript
+  type JsonValue = JsonPrimitive | JsonObject | JsonArray
+  type JsonPrimitive = string | number | boolean | null
+  type JsonObject = { [Key in string]: JsonValue }
+  type JsonArray = JsonValue[]
+  ```
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```typescript Basic object
+import { decode } from 'toon';
+
+const toonString = 'name: Alice\nage: 30';
+const result = decode(toonString);
+console.log(result);
+// Output: { name: 'Alice', age: 30 }
+```
+
+```typescript Array of objects
+import { decode } from 'toon';
+
+const toonString = 'users[]:\n  - id: 1\n  - id: 2';
+const result = decode(toonString);
+console.log(result);
+// Output: { users: [{ id: 1 }, { id: 2 }] }
+```
+
+```typescript With path expansion
+import { decode } from 'toon';
+
+const toonString = 'data.metadata.version: 1.0\ndata.metadata.author: Alice';
+const result = decode(toonString, { expandPaths: 'safe' });
+console.log(result);
+// Output:
+// {
+//   data: {
+//     metadata: {
+//       version: '1.0',
+//       author: 'Alice'
+//     }
+//   }
+// }
+```
+
+```typescript Non-strict mode
+import { decode } from 'toon';
+
+// With strict: false, array length mismatches are allowed
+const toonString = 'items[2]:\n  - value: 1';
+const result = decode(toonString, { strict: false });
+console.log(result);
+// Output: { items: [{ value: 1 }] }
+```
+
+```typescript Custom indentation
+import { decode } from 'toon';
+
+const toonString = 'user:\n    name: Alice\n    age: 30';
+const result = decode(toonString, { indent: 4 });
+console.log(result);
+// Output: { user: { name: 'Alice', age: 30 } }
+```
+
+</CodeGroup>
+
+## Error Handling
+
+The `decode` function throws errors for invalid TOON format:
+
+- Indentation errors (incorrect nesting)
+- Array length mismatches (in strict mode)
+- Invalid syntax (malformed headers, values, etc.)
+- Tabular row count mismatches (in strict mode)
+
+```typescript
+import { decode } from 'toon';
+
+try {
+  const result = decode('invalid toon format');
+} catch (error) {
+  console.error('Decode failed:', error.message);
+}
+```
+
+## Related Functions
+
+- [decodeFromLines](/api/decode-from-lines) - Decode from pre-split lines
+- [encode](/api/encode) - Encode JavaScript values to TOON format

@@ -1,0 +1,392 @@
+---
+title: "decodeStreamSync"
+description: "Synchronously decode TOON lines into a stream of JSON events"
+---
+
+## Overview
+
+`decodeStreamSync` converts TOON-formatted lines into a stream of structured JSON events without building the complete value tree in memory. This enables memory-efficient parsing, custom transformations, and progressive processing of TOON data.
+
+<Note>
+This is the synchronous variant that accepts and returns synchronous iterables. For async sources like file streams or network responses, use [`decodeStream`](/api/decode-stream) instead.
+</Note>
+
+## Function Signature
+
+```typescript
+function decodeStreamSync(
+  lines: Iterable<string>,
+  options?: DecodeStreamOptions
+): Iterable<JsonStreamEvent>
+```
+
+## Parameters
+
+<ParamField path="lines" type="Iterable<string>" required>
+  An iterable of TOON lines (without trailing newlines). Can be an array of strings, a generator, or any synchronous iterable.
+</ParamField>
+
+<ParamField path="options" type="DecodeStreamOptions">
+  Optional configuration object for decoding behavior.
+
+  <ParamField path="indent" type="number" default={2}>
+    Number of spaces per indentation level. Must match the indentation used in the TOON input.
+  </ParamField>
+
+  <ParamField path="strict" type="boolean" default={true}>
+    When `true`, enforces strict validation of array lengths, tabular row counts, and blank line restrictions.
+  </ParamField>
+</ParamField>
+
+<Warning>
+**Path expansion not supported**: The `expandPaths` option from [`decode()`](/api/decode) is not available in streaming mode. Streaming decoders emit raw events without post-processing transformations.
+</Warning>
+
+## Return Value
+
+<ResponseField name="events" type="Iterable<JsonStreamEvent>">
+  A synchronous iterable that yields JSON stream events. Each event represents a structural element of the JSON data model.
+</ResponseField>
+
+## Event Types
+
+The decoder emits six types of events:
+
+<ResponseField name="startObject" type='{ type: "startObject" }'>
+  Marks the beginning of a JSON object.
+</ResponseField>
+
+<ResponseField name="endObject" type='{ type: "endObject" }'>
+  Marks the end of a JSON object.
+</ResponseField>
+
+<ResponseField name="startArray" type='{ type: "startArray", length: number }'>
+  Marks the beginning of a JSON array. The `length` field indicates the declared array length from the TOON header.
+</ResponseField>
+
+<ResponseField name="endArray" type='{ type: "endArray" }'>
+  Marks the end of a JSON array.
+</ResponseField>
+
+<ResponseField name="key" type='{ type: "key", key: string, wasQuoted?: boolean }'>
+  Represents an object key. The optional `wasQuoted` field is `true` when the key was quoted in the TOON source.
+</ResponseField>
+
+<ResponseField name="primitive" type='{ type: "primitive", value: JsonPrimitive }'>
+  Represents a primitive value (string, number, boolean, or null).
+</ResponseField>
+
+## Usage Examples
+
+### Basic Event Streaming
+
+Process TOON lines event-by-event for custom handling:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = [
+  'name: Alice',
+  'age: 30',
+  'active: true'
+]
+
+for (const event of decodeStreamSync(lines)) {
+  console.log(event)
+}
+
+// Output:
+// { type: 'startObject' }
+// { type: 'key', key: 'name' }
+// { type: 'primitive', value: 'Alice' }
+// { type: 'key', key: 'age' }
+// { type: 'primitive', value: 30 }
+// { type: 'key', key: 'active' }
+// { type: 'primitive', value: true }
+// { type: 'endObject' }
+```
+
+### Array Processing
+
+Handle array events with declared lengths:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = [
+  'users[2]:',
+  '  - name: Alice',
+  '  - name: Bob'
+]
+
+for (const event of decodeStreamSync(lines)) {
+  if (event.type === 'startArray') {
+    console.log(`Processing ${event.length} items...`)
+  }
+  console.log(event)
+}
+
+// Output includes:
+// { type: 'startArray', length: 2 }
+```
+
+### Custom Value Builder
+
+Build values with custom logic by handling events manually:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+function buildCustomValue(lines: string[]) {
+  const events = decodeStreamSync(lines)
+  const stack: any[] = []
+  let current: any = null
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'startObject':
+        const obj = {}
+        if (current !== null) stack.push(current)
+        current = obj
+        break
+
+      case 'key':
+        stack.push(event.key)
+        break
+
+      case 'primitive':
+        const key = stack.pop()
+        current[key] = event.value
+        break
+
+      case 'endObject':
+        if (stack.length > 0) {
+          const parent = stack.pop()
+          const parentKey = stack.pop()
+          parent[parentKey] = current
+          current = parent
+        }
+        break
+    }
+  }
+
+  return current
+}
+
+const lines = ['name: Alice', 'score: 95']
+console.log(buildCustomValue(lines))
+// { name: 'Alice', score: 95 }
+```
+
+### Filtering Values During Decode
+
+Use streaming events to filter or transform data on-the-fly:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+function* filterSensitiveKeys(lines: string[]) {
+  let skipNext = false
+
+  for (const event of decodeStreamSync(lines)) {
+    if (event.type === 'key' && event.key === 'password') {
+      skipNext = true
+      continue // Skip the key event
+    }
+
+    if (skipNext && event.type === 'primitive') {
+      skipNext = false
+      continue // Skip the value event
+    }
+
+    yield event
+  }
+}
+
+const lines = [
+  'username: alice',
+  'password: secret123',
+  'email: alice@example.com'
+]
+
+for (const event of filterSensitiveKeys(lines)) {
+  console.log(event)
+}
+// password key and value are omitted
+```
+
+### Reading from a Generator
+
+Work with lazy line generators for memory efficiency:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+function* readLinesFromFile(filePath: string) {
+  // Simplified example - actual implementation would read line-by-line
+  const content = readFileSync(filePath, 'utf-8')
+  yield* content.split('\n')
+}
+
+const lineGenerator = readLinesFromFile('data.toon')
+const events = decodeStreamSync(lineGenerator)
+
+for (const event of events) {
+  // Process events as they're decoded
+  if (event.type === 'primitive') {
+    console.log('Value:', event.value)
+  }
+}
+```
+
+## Custom Indentation
+
+Decode TOON with non-standard indentation:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = [
+  'user:',
+  '    name: Alice',      // 4-space indent
+  '    profile:',
+  '        bio: Engineer' // 8-space indent
+]
+
+const events = decodeStreamSync(lines, { indent: 4 })
+
+for (const event of events) {
+  console.log(event)
+}
+```
+
+## Strict vs. Non-Strict Mode
+
+Control validation behavior with the `strict` option:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+// Strict mode (default): throws on mismatched counts
+const strictLines = [
+  'items[3]:', // Declares 3 items
+  '  - apple',
+  '  - banana'  // Only 2 items provided
+]
+
+try {
+  for (const event of decodeStreamSync(strictLines)) {
+    // Will throw: expected 3 items, got 2
+  }
+} catch (error) {
+  console.error(error.message)
+}
+
+// Non-strict mode: allows mismatched counts
+const events = decodeStreamSync(strictLines, { strict: false })
+for (const event of events) {
+  console.log(event) // Processes without error
+}
+```
+
+## Event Stream Lifecycle
+
+Understanding the event sequence for different TOON structures:
+
+<CodeGroup>
+
+```typescript Object
+const lines = ['key: value']
+// Events:
+// startObject → key → primitive → endObject
+```
+
+```typescript Array
+const lines = ['items[2]:', '  - a', '  - b']
+// Events:
+// startArray → primitive → primitive → endArray
+```
+
+```typescript Nested Object
+const lines = ['user:', '  name: Alice']
+// Events:
+// startObject → key → startObject → key → primitive → endObject → endObject
+```
+
+</CodeGroup>
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Memory Efficient" icon="memory">
+    Only the current event is in memory at any time, enabling processing of arbitrarily large TOON files.
+  </Card>
+  <Card title="Early Termination" icon="stop">
+    Stop iteration at any point to avoid processing unnecessary data.
+  </Card>
+  <Card title="No Buffering" icon="gauge-high">
+    Events are yielded as soon as they're parsed with zero buffering overhead.
+  </Card>
+  <Card title="Generator-Friendly" icon="arrows-rotate">
+    Works seamlessly with generator functions and lazy iterables.
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+Errors are thrown synchronously when invalid TOON syntax is encountered:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const invalidLines = [
+  'key: value',
+  '  invalid indentation' // Unexpected indent
+]
+
+try {
+  for (const event of decodeStreamSync(invalidLines)) {
+    console.log(event)
+  }
+} catch (error) {
+  console.error('Decode error:', error.message)
+  // Handle syntax errors
+}
+```
+
+## Related Functions
+
+<CardGroup cols={2}>
+  <Card title="decodeStream" icon="arrows-rotate" href="/api/decode-stream">
+    Async variant for streaming sources like file readers and network responses
+  </Card>
+  <Card title="decodeFromLines" icon="list" href="/api/decode-from-lines">
+    Decode lines directly to a value (supports path expansion)
+  </Card>
+  <Card title="decode" icon="brackets-curly" href="/api/decode">
+    Standard decoder that builds the complete value tree
+  </Card>
+  <Card title="Event Builder Guide" icon="wrench" href="/guides/streaming">
+    Learn how to build values from event streams
+  </Card>
+</CardGroup>
+
+## Type Definitions
+
+```typescript
+type JsonStreamEvent
+  = | { type: 'startObject' }
+    | { type: 'endObject' }
+    | { type: 'startArray', length: number }
+    | { type: 'endArray' }
+    | { type: 'key', key: string, wasQuoted?: boolean }
+    | { type: 'primitive', value: JsonPrimitive }
+
+type JsonPrimitive = string | number | boolean | null
+
+interface DecodeStreamOptions {
+  indent?: number      // Default: 2
+  strict?: boolean     // Default: true
+  expandPaths?: never  // Not supported in streaming mode
+}
+```

@@ -1,0 +1,574 @@
+---
+title: 'Streaming Large Datasets'
+description: 'Process large TOON datasets efficiently with streaming encode and decode APIs for memory-constrained environments'
+---
+
+## Overview
+
+The TOON SDK provides streaming APIs for processing large datasets without loading everything into memory. This is essential for handling files larger than available RAM, processing data in real-time, or building efficient data pipelines.
+
+## Streaming Encoding
+
+### Basic Streaming Encode
+
+The `encodeLines()` function yields TOON lines one at a time:
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+
+const largeData = {
+  records: Array.from({ length: 100000 }, (_, i) => ({
+    id: i,
+    name: `Record ${i}`,
+    timestamp: Date.now()
+  }))
+}
+
+// Stream lines without building full string
+for (const line of encodeLines(largeData)) {
+  console.log(line)  // Process each line individually
+}
+```
+
+### Writing to Files
+
+Stream directly to files without memory overhead:
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+import { createWriteStream } from 'node:fs'
+
+const data = await fetchLargeDataset()
+const stream = createWriteStream('output.toon')
+
+for (const line of encodeLines(data)) {
+  stream.write(line + '\n')
+}
+
+stream.end()
+```
+
+### Streaming to stdout
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+
+const data = { /* large dataset */ }
+
+for (const line of encodeLines(data)) {
+  process.stdout.write(line + '\n')
+}
+```
+
+### Streaming HTTP Responses
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+import { Readable } from 'node:stream'
+
+app.get('/api/export', async (req, res) => {
+  const data = await fetchLargeDataset()
+  
+  res.setHeader('Content-Type', 'text/toon; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="export.toon"')
+  
+  // Create readable stream from generator
+  const lineGenerator = encodeLines(data)
+  const readable = Readable.from(lineGenerator, { objectMode: false })
+  
+  // Add newlines between lines
+  const withNewlines = readable.pipe(
+    new Transform({
+      transform(chunk, encoding, callback) {
+        callback(null, chunk + '\n')
+      }
+    })
+  )
+  
+  withNewlines.pipe(res)
+})
+```
+
+### Streaming with Options
+
+```typescript
+import { encodeLines, DELIMITERS } from '@toon-format/toon'
+
+const data = { /* dataset */ }
+
+for (const line of encodeLines(data, {
+  indent: 4,
+  delimiter: DELIMITERS.tab,
+  keyFolding: 'safe',
+  replacer: (key, value) => {
+    // Filter sensitive data during streaming
+    if (key === 'password') return undefined
+    return value
+  }
+})) {
+  await processLine(line)
+}
+```
+
+<Note>
+  `encodeLines()` returns an iterable (not an array). You can convert to array with `Array.from()` if needed, but this defeats the memory efficiency.
+</Note>
+
+## Streaming Decoding
+
+### Synchronous Streaming Decode
+
+The `decodeStreamSync()` function yields JSON events without building the full value tree:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = [
+  'name: Alice',
+  'age: 30',
+  'tags[2]: dev,admin'
+]
+
+for (const event of decodeStreamSync(lines)) {
+  console.log(event)
+}
+
+// Output:
+// { type: 'startObject' }
+// { type: 'key', key: 'name' }
+// { type: 'primitive', value: 'Alice' }
+// { type: 'key', key: 'age' }
+// { type: 'primitive', value: 30 }
+// { type: 'key', key: 'tags' }
+// { type: 'startArray', length: 2 }
+// { type: 'primitive', value: 'dev' }
+// { type: 'primitive', value: 'admin' }
+// { type: 'endArray' }
+// { type: 'endObject' }
+```
+
+### Event Types
+
+Streaming decoder emits these event types:
+
+```typescript
+type JsonStreamEvent =
+  | { type: 'startObject' }
+  | { type: 'endObject' }
+  | { type: 'startArray', length: number }
+  | { type: 'endArray' }
+  | { type: 'key', key: string, wasQuoted?: boolean }
+  | { type: 'primitive', value: string | number | boolean | null }
+```
+
+### Processing Events
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+import type { JsonStreamEvent } from '@toon-format/toon'
+
+const lines = await readLinesFromFile('data.toon')
+let currentKey: string | null = null
+
+for (const event of decodeStreamSync(lines)) {
+  switch (event.type) {
+    case 'key':
+      currentKey = event.key
+      break
+    
+    case 'primitive':
+      console.log(`${currentKey}: ${event.value}`)
+      break
+    
+    case 'startArray':
+      console.log(`Array with ${event.length} items`)
+      break
+    
+    case 'startObject':
+      console.log('Starting object')
+      break
+    
+    case 'endObject':
+    case 'endArray':
+      // Handle structure end
+      break
+  }
+}
+```
+
+### Async Streaming Decode
+
+The `decodeStream()` function works with async iterables:
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
+
+// Create async iterable of lines
+const fileStream = createReadStream('large-file.toon')
+const rl = createInterface({
+  input: fileStream,
+  crlfDelay: Infinity
+})
+
+// Stream decode from file
+for await (const event of decodeStream(rl)) {
+  // Process events as they arrive
+  if (event.type === 'primitive') {
+    console.log('Value:', event.value)
+  }
+}
+```
+
+### Filtering During Stream Decode
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = await readLinesFromFile('users.toon')
+const activeUsers: any[] = []
+let currentUser: any = {}
+let inUsersArray = false
+
+for (const event of decodeStreamSync(lines)) {
+  if (event.type === 'key' && event.key === 'users') {
+    inUsersArray = true
+  } else if (event.type === 'endArray' && inUsersArray) {
+    inUsersArray = false
+  } else if (inUsersArray) {
+    if (event.type === 'key') {
+      currentUser.nextKey = event.key
+    } else if (event.type === 'primitive') {
+      if (currentUser.nextKey === 'active' && event.value === true) {
+        activeUsers.push(currentUser)
+      }
+      currentUser[currentUser.nextKey] = event.value
+    } else if (event.type === 'endObject') {
+      currentUser = {}
+    }
+  }
+}
+
+console.log('Active users:', activeUsers)
+```
+
+<Warning>
+  Path expansion (`expandPaths: 'safe'`) is **not supported** in streaming mode. Use the standard `decode()` or `decodeFromLines()` functions if you need path expansion.
+</Warning>
+
+## Building Values from Events
+
+The SDK provides an internal function to build values from events, but you can implement your own:
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+import type { JsonStreamEvent, JsonValue } from '@toon-format/toon'
+
+function buildValue(events: Iterable<JsonStreamEvent>): JsonValue {
+  const stack: any[] = []
+  let root: any
+  let current: any
+  let currentKey: string | null = null
+  
+  for (const event of events) {
+    switch (event.type) {
+      case 'startObject':
+        const obj = {}
+        if (current === undefined) {
+          root = obj
+        } else if (Array.isArray(current)) {
+          current.push(obj)
+        } else if (currentKey !== null) {
+          current[currentKey] = obj
+        }
+        stack.push(current)
+        current = obj
+        currentKey = null
+        break
+      
+      case 'startArray':
+        const arr: any[] = []
+        if (current === undefined) {
+          root = arr
+        } else if (Array.isArray(current)) {
+          current.push(arr)
+        } else if (currentKey !== null) {
+          current[currentKey] = arr
+        }
+        stack.push(current)
+        current = arr
+        currentKey = null
+        break
+      
+      case 'key':
+        currentKey = event.key
+        break
+      
+      case 'primitive':
+        if (Array.isArray(current)) {
+          current.push(event.value)
+        } else if (currentKey !== null) {
+          current[currentKey] = event.value
+          currentKey = null
+        } else {
+          root = event.value
+        }
+        break
+      
+      case 'endObject':
+      case 'endArray':
+        current = stack.pop()
+        break
+    }
+  }
+  
+  return root
+}
+
+const lines = ['name: Alice', 'age: 30']
+const events = decodeStreamSync(lines)
+const value = buildValue(events)
+console.log(value)  // { name: 'Alice', age: 30 }
+```
+
+## Streaming Options
+
+Both sync and async streaming decoders accept options:
+
+```typescript
+import { decodeStreamSync, decodeStream } from '@toon-format/toon'
+
+const options = {
+  indent: 4,      // Match encoding indentation
+  strict: true    // Enable validation
+}
+
+// Sync streaming with options
+for (const event of decodeStreamSync(lines, options)) {
+  // ...
+}
+
+// Async streaming with options
+for await (const event of decodeStream(asyncLines, options)) {
+  // ...
+}
+```
+
+<Note>
+  The `expandPaths` option is not available in streaming mode. Stream decoding focuses on low-level event processing without post-processing transformations.
+</Note>
+
+## Real-World Use Cases
+
+### ETL Pipeline
+
+```typescript
+import { decodeStream } from '@toon-format/toon'
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
+
+// Extract: Read from file stream
+const fileStream = createReadStream('large-dataset.toon')
+const rl = createInterface({ input: fileStream, crlfDelay: Infinity })
+
+// Transform: Process events
+const transformed: any[] = []
+let currentRecord: any = {}
+
+for await (const event of decodeStream(rl)) {
+  if (event.type === 'key') {
+    currentRecord.nextKey = event.key
+  } else if (event.type === 'primitive') {
+    // Transform: uppercase all strings
+    const value = typeof event.value === 'string'
+      ? event.value.toUpperCase()
+      : event.value
+    currentRecord[currentRecord.nextKey] = value
+  } else if (event.type === 'endObject') {
+    transformed.push(currentRecord)
+    currentRecord = {}
+  }
+}
+
+// Load: Insert into database
+await db.insertMany(transformed)
+```
+
+### Memory-Efficient Aggregation
+
+```typescript
+import { decodeStreamSync } from '@toon-format/toon'
+
+const lines = await readLinesFromFile('metrics.toon')
+let totalRevenue = 0
+let recordCount = 0
+let currentKey: string | null = null
+
+for (const event of decodeStreamSync(lines)) {
+  if (event.type === 'key') {
+    currentKey = event.key
+  } else if (event.type === 'primitive' && currentKey === 'revenue') {
+    totalRevenue += Number(event.value)
+  } else if (event.type === 'endObject') {
+    recordCount++
+  }
+}
+
+console.log(`Total revenue: $${totalRevenue}`)
+console.log(`Average: $${totalRevenue / recordCount}`)
+```
+
+### Streaming Transformation
+
+```typescript
+import { encodeLines, decodeStreamSync } from '@toon-format/toon'
+import { createWriteStream } from 'node:fs'
+
+// Read large TOON file
+const inputLines = await readLinesFromFile('input.toon')
+
+// Transform structure (remove sensitive fields)
+const filteredData: any = { records: [] }
+let currentRecord: any = {}
+let currentKey: string | null = null
+
+for (const event of decodeStreamSync(inputLines)) {
+  if (event.type === 'key') {
+    currentKey = event.key
+  } else if (event.type === 'primitive') {
+    // Skip password field
+    if (currentKey !== 'password') {
+      currentRecord[currentKey!] = event.value
+    }
+  } else if (event.type === 'endObject') {
+    filteredData.records.push(currentRecord)
+    currentRecord = {}
+  }
+}
+
+// Write transformed data
+const outputStream = createWriteStream('output.toon')
+for (const line of encodeLines(filteredData)) {
+  outputStream.write(line + '\n')
+}
+outputStream.end()
+```
+
+## Performance Comparison
+
+| Operation | Standard API | Streaming API | Memory Usage |
+|-----------|--------------|---------------|--------------|
+| Encode 100MB dataset | `encode()` | `encodeLines()` | 100MB vs ~10KB |
+| Decode 100MB file | `decode()` | `decodeStream()` | 100MB vs ~10KB |
+| Filter array elements | Load → Filter | Stream filter | 100MB vs ~10KB |
+
+<Tip>
+  Use streaming APIs when:
+  - Dataset exceeds 50% of available memory
+  - Processing data from network streams
+  - Building ETL pipelines
+  - Implementing real-time processing
+</Tip>
+
+## API Reference
+
+### `encodeLines(input, options?)`
+
+Encodes a JavaScript value as an iterable of TOON lines.
+
+**Parameters:**
+- `input: unknown` - Any JavaScript value
+- `options?: EncodeOptions` - Optional configuration
+
+**Returns:** `Iterable<string>` - Iterable of TOON lines (without newlines)
+
+**Source:** [packages/toon/src/index.ts:99](/home/daytona/workspace/source/packages/toon/src/index.ts:99)
+
+### `decodeStreamSync(lines, options?)`
+
+Synchronously decodes TOON lines into JSON events.
+
+**Parameters:**
+- `lines: Iterable<string>` - Iterable of TOON lines (without newlines)
+- `options?: DecodeStreamOptions` - Optional configuration (no expandPaths)
+
+**Returns:** `Iterable<JsonStreamEvent>` - Iterable of JSON events
+
+**Source:** [packages/toon/src/index.ts:175](/home/daytona/workspace/source/packages/toon/src/index.ts:175)
+
+### `decodeStream(source, options?)`
+
+Asynchronously decodes TOON lines into JSON events.
+
+**Parameters:**
+- `source: AsyncIterable<string> | Iterable<string>` - Async or sync iterable of lines
+- `options?: DecodeStreamOptions` - Optional configuration (no expandPaths)
+
+**Returns:** `AsyncIterable<JsonStreamEvent>` - Async iterable of JSON events
+
+**Source:** [packages/toon/src/index.ts:208](/home/daytona/workspace/source/packages/toon/src/index.ts:208)
+
+### `decodeFromLines(lines, options?)`
+
+Decodes TOON format from pre-split lines into a JavaScript value.
+
+**Parameters:**
+- `lines: Iterable<string>` - Iterable of TOON lines (without newlines)
+- `options?: DecodeOptions` - Optional configuration (supports expandPaths)
+
+**Returns:** `JsonValue` - Parsed JavaScript value
+
+**Source:** [packages/toon/src/index.ts:129](/home/daytona/workspace/source/packages/toon/src/index.ts:129)
+
+<Steps>
+  <Step title="Choose streaming API">
+    Use `encodeLines()` for encoding or `decodeStream()` / `decodeStreamSync()` for decoding.
+  </Step>
+  
+  <Step title="Process incrementally">
+    Handle lines or events one at a time without building full dataset in memory.
+  </Step>
+  
+  <Step title="Configure options">
+    Set indentation, validation, and other options as needed.
+  </Step>
+  
+  <Step title="Handle errors">
+    Implement error handling for malformed data or I/O errors.
+  </Step>
+</Steps>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Stream for large data" icon="water">
+    Use streaming APIs for datasets over 50MB or when memory is limited.
+  </Card>
+  
+  <Card title="Process incrementally" icon="forward">
+    Handle events as they arrive instead of buffering everything.
+  </Card>
+  
+  <Card title="Validate early" icon="shield-check">
+    Enable strict mode to catch errors early in the stream.
+  </Card>
+  
+  <Card title="Handle backpressure" icon="gauge-high">
+    Use async streaming with proper flow control for network streams.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Encoding Guide" icon="arrow-right" href="/guides/encoding">
+  Learn all encoding options and transformations
+</Card>
+
+<Card title="Decoding Guide" icon="arrow-right" href="/guides/decoding">
+  Master TOON parsing with validation and path expansion
+</Card>
+
+<Card title="CLI Usage" icon="arrow-right" href="/guides/cli">
+  Use command-line tools for batch processing
+</Card>

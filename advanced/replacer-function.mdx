@@ -1,0 +1,498 @@
+---
+title: Replacer Function
+description: Transform and filter values during TOON encoding with the replacer function - similar to JSON.stringify's replacer but with path tracking
+---
+
+The `replacer` function provides fine-grained control over TOON encoding, allowing you to transform values, filter properties, add metadata, or customize serialization behavior. It's similar to `JSON.stringify`'s replacer parameter but with additional path tracking.
+
+## Overview
+
+The replacer function is called for every value during encoding:
+
+- The **root value** (with `key = ''` and `path = []`)
+- Every **object property** (with property name as `key`)
+- Every **array element** (with string index as `key`: `'0'`, `'1'`, etc.)
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = { name: 'Alice', password: 'secret' }
+
+const safe = encode(data, {
+  replacer: (key, value) => {
+    if (key === 'password') return undefined // Omit password
+    return value
+  }
+})
+// name: Alice
+```
+
+## Function Signature
+
+```ts
+type EncodeReplacer = (
+  key: string,
+  value: JsonValue,
+  path: readonly (string | number)[]
+) => unknown
+```
+
+<ParamField path="key" type="string" required>
+  The property key or array index (as string). Empty string (`''`) for the root value.
+</ParamField>
+
+<ParamField path="value" type="JsonValue" required>
+  The normalized JSON value at this location (after converting to JSON data model).
+</ParamField>
+
+<ParamField path="path" type="readonly (string | number)[]" required>
+  Array representing the path from root to this value. Empty array (`[]`) for root.
+</ParamField>
+
+**Returns:** `unknown`
+- Return the **replacement value** (will be normalized again)
+- Return `undefined` to **omit the property/element**
+- For root value, returning `undefined` means "no change" (root cannot be omitted)
+
+## Common Use Cases
+
+### 1. Filtering Sensitive Fields
+
+Remove passwords, tokens, or other sensitive data before encoding:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const user = {
+  id: 1,
+  name: 'Alice',
+  email: 'alice@example.com',
+  password: 'secret123',
+  apiToken: 'tok_xyz'
+}
+
+const safe = encode(user, {
+  replacer: (key, value) => {
+    // Omit sensitive fields
+    if (key === 'password' || key === 'apiToken') {
+      return undefined
+    }
+    return value
+  }
+})
+// id: 1
+// name: Alice
+// email: alice@example.com
+```
+
+### 2. Transforming Values
+
+Modify values during encoding (e.g., normalize strings, format numbers):
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  status: 'active',
+  description: 'User Account',
+  amount: 123.456
+}
+
+const transformed = encode(data, {
+  replacer: (key, value) => {
+    // Uppercase all strings
+    if (typeof value === 'string') {
+      return value.toUpperCase()
+    }
+    // Round numbers to 2 decimals
+    if (typeof value === 'number') {
+      return Math.round(value * 100) / 100
+    }
+    return value
+  }
+})
+// status: ACTIVE
+// description: USER ACCOUNT
+// amount: 123.46
+```
+
+### 3. Adding Metadata
+
+Inject timestamps, version info, or other metadata at the root:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+const withMetadata = encode(data, {
+  replacer: (key, value, path) => {
+    // Add metadata to root object
+    if (path.length === 0 && typeof value === 'object' && value !== null) {
+      return {
+        ...value as object,
+        _timestamp: Date.now(),
+        _version: '1.0'
+      }
+    }
+    return value
+  }
+})
+// _timestamp: 1709740800000
+// _version: 1.0
+// users[1]{id,name}:
+//   1,Alice
+```
+
+### 4. Path-Based Filtering
+
+Use the `path` parameter to filter based on location in the data structure:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  public: { name: 'Alice', email: 'alice@example.com' },
+  private: { ssn: '123-45-6789', salary: 75000 }
+}
+
+const publicOnly = encode(data, {
+  replacer: (key, value, path) => {
+    // Omit entire 'private' branch
+    if (path.length === 1 && path[0] === 'private') {
+      return undefined
+    }
+    return value
+  }
+})
+// public:
+//   name: Alice
+//   email: alice@example.com
+```
+
+### 5. Conditional Serialization
+
+Serialize objects differently based on context:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice', active: true, lastLogin: null },
+    { id: 2, name: 'Bob', active: false, lastLogin: '2025-01-15' }
+  ]
+}
+
+const filtered = encode(data, {
+  replacer: (key, value, path) => {
+    // Omit null values
+    if (value === null) {
+      return undefined
+    }
+    // Only include active users
+    if (
+      path.length === 2 &&
+      path[0] === 'users' &&
+      typeof value === 'object' &&
+      value !== null &&
+      'active' in value &&
+      !value.active
+    ) {
+      return undefined
+    }
+    return value
+  }
+})
+// users[1]{id,name,active}:
+//   1,Alice,true
+```
+
+### 6. Type Conversion
+
+Convert dates, BigInts, or other non-JSON types:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  created: new Date('2025-03-06'),
+  count: BigInt(9007199254740991)
+}
+
+const serialized = encode(data, {
+  replacer: (key, value) => {
+    // Convert Date to ISO string
+    if (value instanceof Date) {
+      return value.toISOString()
+    }
+    // Convert BigInt to string
+    if (typeof value === 'bigint') {
+      return value.toString()
+    }
+    return value
+  }
+})
+// created: 2025-03-06T00:00:00.000Z
+// count: 9007199254740991
+```
+
+<Note>
+**Note:** The replacer receives normalized JSON values, so `Date` and `BigInt` are already converted by the time the replacer sees them. To handle these types, convert them *before* passing to `encode()`.
+</Note>
+
+### 7. Allowlist Pattern
+
+Only include specific fields:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const ALLOWED_FIELDS = new Set(['id', 'name', 'email'])
+
+const user = {
+  id: 1,
+  name: 'Alice',
+  email: 'alice@example.com',
+  password: 'secret',
+  internal_id: 'x123',
+  metadata: { foo: 'bar' }
+}
+
+const allowlisted = encode(user, {
+  replacer: (key, value, path) => {
+    // At root level, only include allowed fields
+    if (path.length === 1 && !ALLOWED_FIELDS.has(key)) {
+      return undefined
+    }
+    return value
+  }
+})
+// id: 1
+// name: Alice
+// email: alice@example.com
+```
+
+### 8. Truncating Large Arrays
+
+Limit array sizes to reduce token count:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  items: Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `Item ${i}` }))
+}
+
+const truncated = encode(data, {
+  replacer: (key, value, path) => {
+    // Truncate arrays to first 10 items
+    if (Array.isArray(value) && value.length > 10) {
+      return value.slice(0, 10)
+    }
+    return value
+  }
+})
+// items[10]{id,name}:
+//   0,Item 0
+//   1,Item 1
+//   ...
+//   9,Item 9
+```
+
+## Advanced Patterns
+
+### Composing Multiple Replacers
+
+Combine multiple transformations:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+type Replacer = (key: string, value: unknown, path: readonly (string | number)[]) => unknown
+
+function composeReplacers(...replacers: Replacer[]): Replacer {
+  return (key, value, path) => {
+    let result = value
+    for (const replacer of replacers) {
+      result = replacer(key, result, path)
+      if (result === undefined) return undefined
+    }
+    return result
+  }
+}
+
+const removePasswords: Replacer = (key, value) => 
+  key === 'password' ? undefined : value
+
+const uppercaseStrings: Replacer = (key, value) =>
+  typeof value === 'string' ? value.toUpperCase() : value
+
+const combined = composeReplacers(removePasswords, uppercaseStrings)
+
+const user = { name: 'Alice', password: 'secret' }
+encode(user, { replacer: combined })
+// name: ALICE
+```
+
+### Logging All Values
+
+Debug encoding by logging every value:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+encode(data, {
+  replacer: (key, value, path) => {
+    console.log(`[${path.join('.')}] ${key}:`, value)
+    return value
+  }
+})
+// [] :
+// [users] users: [ { id: 1, name: 'Alice' } ]
+// [users.0] 0: { id: 1, name: 'Alice' }
+// [users.0.id] id: 1
+// [users.0.name] name: Alice
+```
+
+### Path-Based Transformation
+
+Apply different transformations based on depth:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  summary: { total: 100 },
+  details: {
+    users: [
+      { id: 1, score: 95.5 },
+      { id: 2, score: 87.3 }
+    ]
+  }
+}
+
+const encoded = encode(data, {
+  replacer: (key, value, path) => {
+    // Round numbers only in deeply nested structures (depth > 2)
+    if (typeof value === 'number' && path.length > 2) {
+      return Math.round(value)
+    }
+    return value
+  }
+})
+// summary:
+//   total: 100
+// details:
+//   users[2]{id,score}:
+//     1,96
+//     2,87
+```
+
+## Performance Considerations
+
+The replacer function is called for **every value** in the data structure:
+
+```ts
+const data = {
+  users: Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `User ${i}` }))
+}
+
+// ⚠️ Called 3001 times: 1 root + 1000 array elements + 2000 properties
+encode(data, {
+  replacer: (key, value) => {
+    // Keep this function fast!
+    return value
+  }
+})
+```
+
+<Tip>
+**Performance tips:**
+- Keep replacer logic simple and fast
+- Avoid expensive operations (API calls, database queries)
+- Use early returns for common cases
+- Pre-compute lookups outside the replacer
+</Tip>
+
+```ts
+// ✅ Good: Pre-compute lookup
+const SENSITIVE_FIELDS = new Set(['password', 'apiToken', 'ssn'])
+
+encode(data, {
+  replacer: (key, value) => {
+    if (SENSITIVE_FIELDS.has(key)) return undefined
+    return value
+  }
+})
+
+// ❌ Bad: Compute every time
+encode(data, {
+  replacer: (key, value) => {
+    if (['password', 'apiToken', 'ssn'].includes(key)) return undefined
+    return value
+  }
+})
+```
+
+## Comparison with JSON.stringify
+
+TOON's replacer is similar to `JSON.stringify`'s replacer with key differences:
+
+| Feature | TOON | JSON.stringify |
+|---------|------|----------------|
+| **Array elements** | Called with string index (`'0'`, `'1'`) | Same |
+| **Root value** | Called with `key = ''` | Same |
+| **Path tracking** | ✅ Third parameter `path` | ❌ Not available |
+| **Root omission** | ❌ Cannot omit root | ✅ Can omit root |
+| **Array support** | ❌ Only functions | ✅ Functions or arrays |
+
+```ts
+// JSON.stringify array replacer (not supported in TOON)
+JSON.stringify(data, ['id', 'name']) // Only include these keys
+
+// TOON equivalent (use function)
+encode(data, {
+  replacer: (key, value, path) => {
+    if (path.length === 1 && !['id', 'name'].includes(key)) {
+      return undefined
+    }
+    return value
+  }
+})
+```
+
+## Error Handling
+
+The replacer function should not throw errors. Return `undefined` to omit invalid values:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = { items: [{ price: '10.50' }, { price: 'invalid' }] }
+
+const safe = encode(data, {
+  replacer: (key, value) => {
+    if (key === 'price' && typeof value === 'string') {
+      const num = parseFloat(value)
+      // Omit invalid numbers instead of throwing
+      return isNaN(num) ? undefined : num
+    }
+    return value
+  }
+})
+// items[1]{price}:
+//   10.5
+```
+
+<Note>
+If the replacer throws an error, encoding will fail. Use try-catch inside the replacer if needed.
+</Note>
+
+## Examples Repository
+
+For more examples, see:
+- [TOON SDK tests](https://github.com/toon-format/toon/tree/main/packages/toon/tests)
+- [Replacer function tests](https://github.com/toon-format/toon/blob/main/packages/toon/tests/replacer.test.ts)

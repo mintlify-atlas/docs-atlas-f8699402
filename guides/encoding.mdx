@@ -1,0 +1,517 @@
+---
+title: 'Encoding JSON to TOON'
+description: 'Learn how to encode JavaScript values into token-efficient TOON format with full control over formatting, delimiters, and transformations'
+---
+
+## Overview
+
+TOON encoding converts JavaScript values (objects, arrays, primitives) into the token-efficient TOON format. The SDK provides multiple encoding functions for different use cases, from simple one-shot encoding to memory-efficient streaming for large datasets.
+
+## Basic Encoding
+
+### Simple Objects
+
+The `encode()` function converts any JavaScript value to TOON format:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const user = {
+  name: 'Alice',
+  age: 30,
+  active: true
+}
+
+const toon = encode(user)
+console.log(toon)
+// name: Alice
+// age: 30
+// active: true
+```
+
+### Nested Objects
+
+Nested structures use indentation to show hierarchy:
+
+```typescript
+const data = {
+  user: {
+    profile: {
+      name: 'Bob',
+      email: 'bob@example.com'
+    }
+  }
+}
+
+console.log(encode(data))
+// user:
+//   profile:
+//     name: Bob
+//     email: bob@example.com
+```
+
+### Uniform Arrays (Tabular Format)
+
+Arrays of uniform objects are encoded as compact tables:
+
+```typescript
+const users = {
+  users: [
+    { id: 1, name: 'Alice', role: 'admin' },
+    { id: 2, name: 'Bob', role: 'user' },
+    { id: 3, name: 'Carol', role: 'user' }
+  ]
+}
+
+console.log(encode(users))
+// users[3]{id,name,role}:
+//   1,Alice,admin
+//   2,Bob,user
+//   3,Carol,user
+```
+
+### Primitive Arrays
+
+Arrays of primitives are encoded inline:
+
+```typescript
+const data = {
+  tags: ['typescript', 'node', 'api'],
+  scores: [95, 87, 92]
+}
+
+console.log(encode(data))
+// tags[3]: typescript,node,api
+// scores[3]: 95,87,92
+```
+
+## Encoding Options
+
+Customize encoding behavior with the `EncodeOptions` interface:
+
+```typescript
+interface EncodeOptions {
+  indent?: number          // Spaces per indentation level (default: 2)
+  delimiter?: Delimiter    // Array delimiter: ',' | '\t' | '|' (default: ',')
+  keyFolding?: 'off' | 'safe'  // Collapse single-key chains (default: 'off')
+  flattenDepth?: number    // Max folded segments (default: Infinity)
+  replacer?: EncodeReplacer // Transform/filter function (default: undefined)
+}
+```
+
+### Custom Indentation
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  server: {
+    host: 'localhost',
+    port: 8080
+  }
+}
+
+// Use 4-space indentation
+console.log(encode(data, { indent: 4 }))
+// server:
+//     host: localhost
+//     port: 8080
+```
+
+### Tab Delimiter
+
+Tabs are the most token-efficient delimiter:
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const data = {
+  metrics: [
+    { date: '2025-01-01', views: 1000, clicks: 50 },
+    { date: '2025-01-02', views: 1200, clicks: 65 }
+  ]
+}
+
+// Use tab delimiter for maximum token efficiency
+const toon = encode(data, { delimiter: DELIMITERS.tab })
+console.log(toon)
+// metrics[2]{date,views,clicks}:
+//   2025-01-01\t1000\t50
+//   2025-01-02\t1200\t65
+```
+
+<Note>
+  Tab delimiters (`\t`) provide the best token efficiency, reducing tokens by ~5-10% compared to commas. Use tabs for LLM input where token count matters most.
+</Note>
+
+### Pipe Delimiter
+
+Pipes are useful when data contains commas:
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const data = {
+  products: [
+    { id: 1, name: 'Widget, Premium', price: 29.99 },
+    { id: 2, name: 'Gadget, Standard', price: 19.99 }
+  ]
+}
+
+const toon = encode(data, { delimiter: DELIMITERS.pipe })
+console.log(toon)
+// products[2]{id,name,price}:
+//   1|Widget, Premium|29.99
+//   2|Gadget, Standard|19.99
+```
+
+### Key Folding
+
+Key folding collapses single-key wrapper chains into dotted paths:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const config = {
+  database: {
+    connection: {
+      pool: {
+        max: 10,
+        min: 2
+      }
+    }
+  }
+}
+
+// Without key folding (default)
+console.log(encode(config))
+// database:
+//   connection:
+//     pool:
+//       max: 10
+//       min: 2
+
+// With key folding
+console.log(encode(config, { keyFolding: 'safe' }))
+// database.connection.pool:
+//   max: 10
+//   min: 2
+```
+
+<Warning>
+  Key folding only works with `expandPaths: 'safe'` during decoding to ensure lossless round-trips. See [Decoding Guide](/guides/decoding#path-expansion).
+</Warning>
+
+### Flatten Depth
+
+Control how deep key folding can go:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  a: { b: { c: { d: { value: 'deep' } } } }
+}
+
+// Fold up to 2 levels
+console.log(encode(data, { keyFolding: 'safe', flattenDepth: 2 }))
+// a.b:
+//   c:
+//     d:
+//       value: deep
+
+// Fold up to 3 levels
+console.log(encode(data, { keyFolding: 'safe', flattenDepth: 3 }))
+// a.b.c:
+//   d:
+//     value: deep
+```
+
+## Value Transformation with Replacer
+
+The `replacer` function provides fine-grained control over encoding, similar to `JSON.stringify`:
+
+### Removing Fields
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const user = {
+  name: 'Alice',
+  email: 'alice@example.com',
+  password: 'secret123',
+  apiKey: 'sk-abc123'
+}
+
+// Remove sensitive fields
+const safe = encode(user, {
+  replacer: (key, value) => {
+    if (key === 'password' || key === 'apiKey') {
+      return undefined  // Omit from output
+    }
+    return value
+  }
+})
+
+console.log(safe)
+// name: Alice
+// email: alice@example.com
+```
+
+### Transforming Values
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  status: 'active',
+  priority: 'high',
+  count: 42
+}
+
+// Uppercase all strings
+const transformed = encode(data, {
+  replacer: (key, value) => {
+    if (typeof value === 'string') {
+      return value.toUpperCase()
+    }
+    return value
+  }
+})
+
+console.log(transformed)
+// status: ACTIVE
+// priority: HIGH
+// count: 42
+```
+
+### Path-Based Filtering
+
+Use the `path` parameter for context-aware transformations:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice', internal: true },
+    { id: 2, name: 'Bob', internal: false }
+  ]
+}
+
+// Remove 'internal' field only from user objects
+const filtered = encode(data, {
+  replacer: (key, value, path) => {
+    // path is like: ['users', 0, 'internal']
+    if (path.length > 0 && path[0] === 'users' && key === 'internal') {
+      return undefined
+    }
+    return value
+  }
+})
+
+console.log(filtered)
+// users[2]{id,name}:
+//   1,Alice
+//   2,Bob
+```
+
+### Adding Metadata
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [{ name: 'Alice' }, { name: 'Bob' }]
+}
+
+// Add timestamp at root level
+const withMetadata = encode(data, {
+  replacer: (key, value, path) => {
+    // Root value has empty path
+    if (path.length === 0 && typeof value === 'object' && value !== null) {
+      return {
+        _timestamp: Date.now(),
+        _version: '1.0',
+        ...value
+      }
+    }
+    return value
+  }
+})
+
+console.log(withMetadata)
+// _timestamp: 1709686400000
+// _version: 1.0
+// users[2]{name}:
+//   Alice
+//   Bob
+```
+
+<Note>
+  The replacer function receives `(key, value, path)` where:
+  - `key` is the property name or array index as a string (empty string `''` for root)
+  - `value` is the normalized JSON value
+  - `path` is an array of keys/indices from root to current value
+</Note>
+
+## Streaming Large Datasets
+
+For large datasets, use `encodeLines()` to avoid building the entire string in memory:
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+import { writeFile } from 'node:fs/promises'
+
+const largeData = {
+  records: Array.from({ length: 100000 }, (_, i) => ({
+    id: i,
+    name: `User ${i}`,
+    timestamp: Date.now()
+  }))
+}
+
+// Stream to file without building full string
+const lines = []
+for (const line of encodeLines(largeData)) {
+  lines.push(line)
+}
+
+await writeFile('output.toon', lines.join('\n'))
+```
+
+### Streaming to stdout
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+
+const data = await fetchLargeDataset()
+
+// Stream line-by-line to stdout
+for (const line of encodeLines(data)) {
+  process.stdout.write(line + '\n')
+}
+```
+
+### Streaming with Options
+
+```typescript
+import { encodeLines, DELIMITERS } from '@toon-format/toon'
+
+const data = { /* large dataset */ }
+
+// Stream with custom options
+for (const line of encodeLines(data, {
+  indent: 4,
+  delimiter: DELIMITERS.tab,
+  keyFolding: 'safe'
+})) {
+  // Process each line individually
+  await sendToAPI(line)
+}
+```
+
+<Tip>
+  `encodeLines()` is an iterable that yields lines one at a time. It's perfect for:
+  - Writing to files without memory overhead
+  - Streaming HTTP responses
+  - Processing large datasets chunk by chunk
+</Tip>
+
+## Available Delimiters
+
+The SDK provides three delimiter options:
+
+```typescript
+import { DELIMITERS } from '@toon-format/toon'
+
+DELIMITERS.comma  // ',' - default, widely compatible
+DELIMITERS.tab    // '\t' - most token-efficient
+DELIMITERS.pipe   // '|' - useful when data contains commas
+```
+
+### Delimiter Comparison
+
+| Delimiter | Token Efficiency | Use Case |
+|-----------|-----------------|----------|
+| Comma `,` | Good | Default choice, CSV-like familiarity |
+| Tab `\t` | Best | Maximum token savings for LLM input |
+| Pipe `|` | Good | Data contains commas or complex strings |
+
+<Steps>
+  <Step title="Choose your delimiter">
+    Start with comma for readability. Switch to tab for LLM input to maximize token savings.
+  </Step>
+  
+  <Step title="Configure options">
+    Set indentation, key folding, and other options based on your data structure.
+  </Step>
+  
+  <Step title="Add transformations">
+    Use the replacer function to filter sensitive data or transform values.
+  </Step>
+  
+  <Step title="Stream when needed">
+    For large datasets, use `encodeLines()` instead of `encode()` to avoid memory issues.
+  </Step>
+</Steps>
+
+## API Reference
+
+### `encode(input, options?)`
+
+Encodes a JavaScript value to TOON format string.
+
+**Parameters:**
+- `input: unknown` - Any JavaScript value
+- `options?: EncodeOptions` - Optional configuration
+
+**Returns:** `string` - TOON formatted string
+
+**Source:** [packages/toon/src/index.ts:48](/home/daytona/workspace/source/packages/toon/src/index.ts:48)
+
+### `encodeLines(input, options?)`
+
+Encodes a JavaScript value as an iterable of TOON lines.
+
+**Parameters:**
+- `input: unknown` - Any JavaScript value
+- `options?: EncodeOptions` - Optional configuration
+
+**Returns:** `Iterable<string>` - Iterable of TOON lines (without newlines)
+
+**Source:** [packages/toon/src/index.ts:99](/home/daytona/workspace/source/packages/toon/src/index.ts:99)
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use tabs for LLM input" icon="minimize">
+    Tab delimiters reduce token count by ~5-10% compared to commas.
+  </Card>
+  
+  <Card title="Stream large data" icon="water">
+    Use `encodeLines()` for datasets over 10MB to avoid memory issues.
+  </Card>
+  
+  <Card title="Remove sensitive data" icon="shield">
+    Use the replacer function to filter passwords, API keys, and PII.
+  </Card>
+  
+  <Card title="Test round-trips" icon="rotate">
+    Verify that `decode(encode(data))` equals original data.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Decoding TOON" icon="arrow-right" href="/guides/decoding">
+  Learn how to parse TOON format back into JavaScript values
+</Card>
+
+<Card title="Streaming" icon="arrow-right" href="/guides/streaming">
+  Process large datasets with streaming encode/decode APIs
+</Card>
+
+<Card title="LLM Integration" icon="arrow-right" href="/guides/llm-integration">
+  Use TOON format effectively with Large Language Models
+</Card>

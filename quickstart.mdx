@@ -1,80 +1,420 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get started with TOON in 5 minutes - install, encode, and decode your first data"
 ---
 
-## Get started in three steps
+## Installation
 
-Get your documentation site running locally and make your first customization.
+Install the TOON SDK for TypeScript/JavaScript:
 
-### Step 1: Set up your local environment
+<CodeGroup>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+```bash npm
+npm install @toon-format/toon
+```
+
+```bash pnpm
+pnpm add @toon-format/toon
+```
+
+```bash yarn
+yarn add @toon-format/toon
+```
+
+</CodeGroup>
+
+<Note>
+**Package**: `@toon-format/toon` v2.1.0 or later  
+**Homepage**: [toonformat.dev](https://toonformat.dev)  
+**GitHub**: [github.com/toon-format/toon](https://github.com/toon-format/toon)
+</Note>
+
+## Your First Encoding
+
+Encode JavaScript objects to TOON format using the `encode()` function:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice', role: 'admin' },
+    { id: 2, name: 'Bob', role: 'user' }
+  ]
+}
+
+console.log(encode(data))
+```
+
+**Output**:
+
+```yaml
+users[2]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user
+```
+
+<Note>
+Notice how TOON declares the array length `[2]` and field names `{id,name,role}` once, then streams row values. This is the key to TOON's token efficiency.
+</Note>
+
+## Your First Decoding
+
+Decode TOON strings back to JavaScript objects using the `decode()` function:
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const toon = `users[2]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user`
+
+const result = decode(toon)
+console.log(result)
+```
+
+**Output**:
+
+```json
+{
+  "users": [
+    { "id": 1, "name": "Alice", "role": "admin" },
+    { "id": 2, "name": "Bob", "role": "user" }
+  ]
+}
+```
+
+<Note>
+TOON provides **100% lossless, deterministic round-trips** between JSON and TOON. No data is lost in conversion.
+</Note>
+
+## Working with Real Data
+
+Let's encode a more realistic dataset - employee records:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const employees = {
+  company: 'Acme Corp',
+  department: 'Engineering',
+  employees: [
+    { id: 101, name: 'Alice Johnson', salary: 95000, active: true },
+    { id: 102, name: 'Bob Smith', salary: 87000, active: true },
+    { id: 103, name: 'Carol White', salary: 92000, active: false }
+  ]
+}
+
+console.log(encode(employees))
+```
+
+**Output**:
+
+```yaml
+company: Acme Corp
+department: Engineering
+employees[3]{id,name,salary,active}:
+  101,Alice Johnson,95000,true
+  102,Bob Smith,87000,true
+  103,Carol White,92000,false
+```
+
+**Token Comparison**:
+- JSON (formatted): ~180 tokens
+- TOON: ~95 tokens
+- **Savings**: ~47%
+
+## Encoding Options
+
+Customize encoding with options:
+
+<CodeGroup>
+
+```typescript Custom Indentation
+import { encode } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+// Use 4 spaces for indentation (default is 2)
+const toon = encode(data, { indent: 4 })
+```
+
+```typescript Tab Delimiters
+import { encode } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+// Use tabs instead of commas (even more efficient!)
+const toon = encode(data, { delimiter: '\t' })
+// users[1]{id\tname}:
+//   1\tAlice
+```
+
+```typescript Key Folding
+import { encode } from '@toon-format/toon'
+
+const data = {
+  api: {
+    config: {
+      timeout: 5000
+    }
+  }
+}
+
+// Collapse single-key chains into dotted paths
+const toon = encode(data, { keyFolding: 'safe' })
+// api.config.timeout: 5000
+```
+
+</CodeGroup>
+
+<Note>
+See [Encode Options](/api/encode-options) for all available configuration options.
+</Note>
+
+## Streaming Large Datasets
+
+For large datasets, use `encodeLines()` to stream output line by line without building the full string in memory:
+
+```typescript
+import { encodeLines } from '@toon-format/toon'
+
+const largeData = await fetchThousandsOfRecords()
+
+// Memory-efficient streaming
+for (const line of encodeLines(largeData)) {
+  process.stdout.write(`${line}\n`)
+}
+```
+
+**When to use streaming**:
+- Datasets with thousands of records
+- Writing to files or HTTP responses
+- Memory-constrained environments
+- Real-time data processing
+
+<Note>
+For streaming decode, see [`decodeFromLines()`](/api/decode-from-lines), [`decodeStreamSync()`](/api/decode-stream-sync), and [`decodeStream()`](/api/decode-stream).
+</Note>
+
+## Using the CLI
+
+For quick conversions without writing code, use the TOON CLI:
+
+<Steps>
+  <Step title="No installation needed">
+    Use `npx` to run the CLI instantly:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    # Convert JSON to TOON
+    npx @toon-format/cli input.json -o output.toon
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    # Decode TOON to JSON
+    npx @toon-format/cli data.toon -o output.json
+    ```
+  </Step>
+  
+  <Step title="Pipe from stdin">
+    The CLI auto-detects format and supports pipes:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    # Pipe JSON directly
+    echo '{"name": "Ada", "role": "dev"}' | npx @toon-format/cli
+    
+    # Chain with other tools
+    curl https://api.example.com/data | npx @toon-format/cli
+    ```
+  </Step>
+  
+  <Step title="Analyze token savings">
+    Use `--stats` to compare token counts:
+    
+    ```bash
+    npx @toon-format/cli data.json --stats
+    # TOON: 1,234 tokens
+    # JSON: 2,456 tokens  
+    # Savings: 49.8%
+    ```
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Note>
+See the [CLI Guide](/guides/cli) for all options and examples.
+</Note>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Working with LLMs
 
-### Step 3: Go live
+TOON works best when you **show the format** instead of describing it. The structure is self-documenting:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```typescript
+import { encode } from '@toon-format/toon'
+import Anthropic from '@anthropic-ai/sdk'
 
-## Next steps
+const client = new Anthropic()
 
-Now that you have your docs running, explore these key features:
+const employees = [
+  { id: 1, name: 'Alice', dept: 'Eng', salary: 95000 },
+  { id: 2, name: 'Bob', dept: 'Sales', salary: 87000 },
+  // ... 100 more employees
+]
+
+// Encode data as TOON
+const toonData = encode({ employees })
+
+const response = await client.messages.create({
+  model: 'claude-4.5-sonnet',
+  max_tokens: 1024,
+  messages: [{
+    role: 'user',
+    content: `Here is employee data in TOON format:
+
+\`\`\`toon
+${toonData}
+\`\`\`
+
+How many employees in Engineering have salary > $90,000?`
+  }]
+})
+```
+
+<Note>
+**Pro tip**: Wrap TOON in ` ```toon` code blocks for input. For generation tasks, show the expected header template and use tab delimiters for better efficiency.
+</Note>
+
+See the [LLM Integration Guide](/guides/llm-integration) for detailed strategies.
+
+## Transforming Data with Replacer
+
+Use the `replacer` function to filter or transform values during encoding:
+
+<CodeGroup>
+
+```typescript Remove Sensitive Fields
+import { encode } from '@toon-format/toon'
+
+const user = {
+  name: 'Alice',
+  email: 'alice@example.com',
+  password: 'secret123',
+  apiKey: 'sk-abc123'
+}
+
+const safe = encode(user, {
+  replacer: (key, value) => {
+    // Remove sensitive fields
+    if (key === 'password' || key === 'apiKey') {
+      return undefined
+    }
+    return value
+  }
+})
+
+// Output:
+// name: Alice
+// email: alice@example.com
+```
+
+```typescript Transform Values
+import { encode } from '@toon-format/toon'
+
+const data = {
+  status: 'active',
+  category: 'premium',
+  count: 42
+}
+
+const transformed = encode(data, {
+  replacer: (key, value) => {
+    // Uppercase all strings
+    if (typeof value === 'string') {
+      return value.toUpperCase()
+    }
+    return value
+  }
+})
+
+// Output:
+// status: ACTIVE
+// category: PREMIUM
+// count: 42
+```
+
+```typescript Add Metadata
+import { encode } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+const withMeta = encode(data, {
+  replacer: (key, value, path) => {
+    // Add timestamp to root object
+    if (path.length === 0 && typeof value === 'object' && value !== null) {
+      return {
+        _timestamp: Date.now(),
+        _version: '1.0',
+        ...value
+      }
+    }
+    return value
+  }
+})
+```
+
+</CodeGroup>
+
+<Note>
+The `replacer` function is similar to `JSON.stringify`'s replacer but includes path tracking. See the [Replacer Function Guide](/advanced/replacer-function) for more examples.
+</Note>
+
+## Next Steps
+
+Now that you've learned the basics, explore these topics:
 
 <CardGroup cols={2}>
+  <Card title="Format Overview" icon="book" href="/concepts/format-overview">
+    Learn the complete TOON syntax and structure
+  </Card>
+  <Card title="Encoding Guide" icon="arrow-right" href="/guides/encoding">
+    Master all encoding options and patterns
+  </Card>
+  <Card title="Streaming" icon="stream" href="/guides/streaming">
+    Handle large datasets efficiently
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/encode">
+    Explore all functions and options
+  </Card>
+</CardGroup>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+## Interactive Playground
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+Experiment with TOON in your browser:
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+- [Official TOON Playground](https://toonformat.dev/playground) - Real-time conversion and token comparison
+- [Format Tokenization Explorer](https://www.curiouslychase.com/playground/format-tokenization-exploration)
+- [TOON Tools](https://toontools.vercel.app/)
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+## Editor Support
 
+Install syntax highlighting and validation for your editor:
+
+<CardGroup cols={2}>
+  <Card title="VS Code" icon="code">
+    Install the [TOON Language Support](https://marketplace.visualstudio.com/items?itemName=vishalraut.vscode-toon) extension:
+    
+    ```bash
+    code --install-extension vishalraut.vscode-toon
+    ```
+  </Card>
+  <Card title="Neovim" icon="terminal">
+    Install [toon.nvim](https://github.com/thalesgelinger/toon.nvim) plugin
+  </Card>
+  <Card title="Tree-sitter" icon="tree">
+    Use [tree-sitter-toon](https://github.com/3swordman/tree-sitter-toon) for any editor with Tree-sitter support (Helix, Emacs, Zed)
+  </Card>
+  <Card title="Other Editors" icon="ellipsis">
+    Use YAML syntax highlighting as a close approximation
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+**Need help?** Check the [GitHub repository](https://github.com/toon-format/toon) or file an issue.
 </Note>

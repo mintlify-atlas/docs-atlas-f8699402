@@ -1,0 +1,314 @@
+---
+title: 'EncodeOptions'
+description: 'Configuration options for encoding JavaScript values to TOON format'
+---
+
+The `EncodeOptions` interface allows you to customize how JavaScript values are encoded to TOON format. All options are optional and have sensible defaults.
+
+## Interface
+
+```typescript
+interface EncodeOptions {
+  indent?: number
+  delimiter?: Delimiter
+  keyFolding?: 'off' | 'safe'
+  flattenDepth?: number
+  replacer?: EncodeReplacer
+}
+```
+
+## Options
+
+<ParamField path="indent" type="number" default={2}>
+  Number of spaces per indentation level. Controls how deeply nested structures are visually indented in the output.
+
+  <Accordion title="Example">
+    ```typescript
+    import { encode } from 'toon'
+
+    const data = { user: { name: 'Alice', age: 30 } }
+
+    // Default 2-space indentation
+    encode(data)
+    // user:
+    //   name: Alice
+    //   age: 30
+
+    // 4-space indentation
+    encode(data, { indent: 4 })
+    // user:
+    //     name: Alice
+    //     age: 30
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="delimiter" type="Delimiter" default="DELIMITERS.comma">
+  Delimiter to use for separating values in tabular array rows and inline primitive arrays.
+
+  Available delimiters:
+  - `DELIMITERS.comma` - `,` (default)
+  - `DELIMITERS.tab` - `\t`
+  - `DELIMITERS.pipe` - `|`
+
+  <Accordion title="Example">
+    ```typescript
+    import { encode, DELIMITERS } from 'toon'
+
+    const data = { numbers: [1, 2, 3, 4] }
+
+    // Comma delimiter (default)
+    encode(data)
+    // numbers[4]: 1, 2, 3, 4
+
+    // Tab delimiter
+    encode(data, { delimiter: DELIMITERS.tab })
+    // numbers[4]: 1	2	3	4
+
+    // Pipe delimiter
+    encode(data, { delimiter: DELIMITERS.pipe })
+    // numbers[4]: 1 | 2 | 3 | 4
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="keyFolding" type="'off' | 'safe'" default="'off'">
+  Enable key folding to collapse single-key wrapper chains into dotted paths.
+
+  When set to `'safe'`, nested objects with single keys are collapsed into dotted notation (e.g., `data.metadata.items` instead of nested indentation). This reduces token usage for deeply nested structures.
+
+  <Accordion title="Example">
+    ```typescript
+    import { encode } from 'toon'
+
+    const data = {
+      response: {
+        data: {
+          user: {
+            name: 'Alice'
+          }
+        }
+      }
+    }
+
+    // Without key folding (default)
+    encode(data)
+    // response:
+    //   data:
+    //     user:
+    //       name: Alice
+
+    // With safe key folding
+    encode(data, { keyFolding: 'safe' })
+    // response.data.user.name: Alice
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="flattenDepth" type="number" default="Infinity">
+  Maximum number of segments to fold when `keyFolding` is enabled.
+
+  Controls how deep the folding can go in single-key chains. Values 0 or 1 have no practical effect (treated as effectively disabled).
+
+  <Accordion title="Example">
+    ```typescript
+    import { encode } from 'toon'
+
+    const data = {
+      a: {
+        b: {
+          c: {
+            d: {
+              value: 'deep'
+            }
+          }
+        }
+      }
+    }
+
+    // Unlimited folding (default)
+    encode(data, { keyFolding: 'safe' })
+    // a.b.c.d.value: deep
+
+    // Limited to 2 segments
+    encode(data, { keyFolding: 'safe', flattenDepth: 2 })
+    // a.b:
+    //   c:
+    //     d:
+    //       value: deep
+    ```
+  </Accordion>
+</ParamField>
+
+<ParamField path="replacer" type="EncodeReplacer" default="undefined">
+  A function to transform or filter values during encoding.
+
+  Called for the root value and every nested property/element. Similar to `JSON.stringify`'s replacer, but with path tracking. Return `undefined` to omit properties/elements (root cannot be omitted).
+
+  **Type signature:**
+  ```typescript
+  type EncodeReplacer = (
+    key: string,
+    value: JsonValue,
+    path: readonly (string | number)[]
+  ) => unknown
+  ```
+
+  **Parameters:**
+  - `key` - The property key or array index (as string). Empty string (`''`) for root value.
+  - `value` - The normalized `JsonValue` at this location.
+  - `path` - Array representing the path from root to this value.
+
+  **Returns:**
+  - The replacement value (will be normalized again), or `undefined` to omit.
+  - For root value, returning `undefined` means "no change" (don't omit root).
+
+  <Accordion title="Examples">
+    ```typescript
+    import { encode } from 'toon'
+
+    // Remove sensitive fields
+    const data = {
+      username: 'alice',
+      password: 'secret123',
+      email: 'alice@example.com'
+    }
+
+    const removeSensitive = (key, value) => {
+      if (key === 'password') return undefined
+      return value
+    }
+
+    encode(data, { replacer: removeSensitive })
+    // username: alice
+    // email: alice@example.com
+
+    // Add timestamps at root level
+    const addTimestamp = (key, value, path) => {
+      if (path.length === 0 && typeof value === 'object' && value !== null) {
+        return { ...value, _timestamp: Date.now() }
+      }
+      return value
+    }
+
+    encode({ user: 'alice' }, { replacer: addTimestamp })
+    // user: alice
+    // _timestamp: 1709689200000
+
+    // Transform values based on path
+    const transformByPath = (key, value, path) => {
+      // Convert all prices to cents
+      if (key === 'price' && typeof value === 'number') {
+        return Math.round(value * 100)
+      }
+      return value
+    }
+
+    const product = {
+      name: 'Widget',
+      price: 19.99
+    }
+
+    encode(product, { replacer: transformByPath })
+    // name: Widget
+    // price: 1999
+    ```
+  </Accordion>
+</ParamField>
+
+## Type: ResolvedEncodeOptions
+
+The internal type representing fully resolved encoding options with all defaults applied:
+
+```typescript
+type ResolvedEncodeOptions = 
+  Readonly<Required<Omit<EncodeOptions, 'replacer'>>> & 
+  Pick<EncodeOptions, 'replacer'>
+```
+
+This type is used internally by the encoder after resolving all option defaults. You typically don't need to use this type directly.
+
+## Usage Examples
+
+### Basic encoding with custom options
+
+```typescript
+import { encode, DELIMITERS } from 'toon'
+
+const options = {
+  indent: 4,
+  delimiter: DELIMITERS.pipe,
+  keyFolding: 'safe' as const
+}
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice', email: 'alice@example.com' },
+    { id: 2, name: 'Bob', email: 'bob@example.com' }
+  ]
+}
+
+const toon = encode(data, options)
+console.log(toon)
+```
+
+### Streaming with options
+
+```typescript
+import { encodeLines } from 'toon'
+import { writeFile } from 'fs/promises'
+
+const options = {
+  indent: 2,
+  keyFolding: 'safe' as const,
+  flattenDepth: 3
+}
+
+const lines = Array.from(encodeLines(largeDataset, options))
+await writeFile('output.toon', lines.join('\n'))
+```
+
+### Advanced replacer usage
+
+<CodeGroup>
+```typescript Filtering
+// Remove all null values
+const removeNulls = (key, value) => {
+  if (value === null) return undefined
+  return value
+}
+
+encode(data, { replacer: removeNulls })
+```
+
+```typescript Transformation
+// Normalize dates to ISO strings
+const normalizeDates = (key, value) => {
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  return value
+}
+
+encode(data, { replacer: normalizeDates })
+```
+
+```typescript Path-based
+// Redact sensitive data at specific paths
+const redactSensitive = (key, value, path) => {
+  const pathStr = path.join('.')
+  if (pathStr.includes('ssn') || pathStr.includes('password')) {
+    return '[REDACTED]'
+  }
+  return value
+}
+
+encode(data, { replacer: redactSensitive })
+```
+</CodeGroup>
+
+## See Also
+
+- [DecodeOptions](/api/decode-options) - Options for decoding TOON to JavaScript
+- [Types](/api/types) - Complete type definitions
+- [encode()](/api/encode) - Main encoding function

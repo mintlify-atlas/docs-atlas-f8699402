@@ -1,0 +1,353 @@
+---
+title: Benchmarks
+description: Comprehensive benchmark results measuring TOON's token efficiency and retrieval accuracy compared to JSON, YAML, XML, and CSV
+---
+
+TOON benchmarks measure two critical metrics: **token efficiency** (how much data can be compressed) and **retrieval accuracy** (how well LLMs understand the format). These benchmarks provide empirical evidence for TOON's effectiveness across different data structures and use cases.
+
+## Benchmark Methodology
+
+Benchmarks are organized into two tracks to ensure fair comparisons:
+
+- **Mixed-Structure Track**: Datasets with nested or semi-uniform structures (TOON vs JSON, YAML, XML). CSV excluded as it cannot properly represent these structures.
+- **Flat-Only Track**: Datasets with flat tabular structures where CSV is applicable (CSV vs TOON vs JSON, YAML, XML).
+
+### Token Counting
+
+All token counts use the GPT-5 `o200k_base` tokenizer via [`gpt-tokenizer`](https://github.com/niieani/gpt-tokenizer). Savings are calculated against formatted JSON (2-space indentation) as the primary baseline, with additional comparisons to compact JSON (minified), YAML, and XML.
+
+<Note>
+Actual token savings vary by model and tokenizer. The `o200k_base` encoding is used as a standardized reference point across all measurements.
+</Note>
+
+## Retrieval Accuracy Benchmark
+
+This benchmark tests **LLM comprehension and data retrieval accuracy** across different input formats. Each LLM receives formatted data and must answer questions about it.
+
+<Tip>
+This does **not** test the model's ability to generate TOON output – only to read and understand it as input.
+</Tip>
+
+### Overall Results
+
+Tested across **4 models** with **209 questions** on **11 datasets** (5,016 total LLM calls):
+
+```
+Efficiency Ranking (Accuracy per 1K Tokens)
+
+TOON           ████████████████████   27.7 acc%/1K tok  │  76.4% acc  │  2,759 tokens
+JSON compact   █████████████████░░░   23.7 acc%/1K tok  │  73.7% acc  │  3,104 tokens
+YAML           ██████████████░░░░░░   19.9 acc%/1K tok  │  74.5% acc  │  3,749 tokens
+JSON           ████████████░░░░░░░░   16.4 acc%/1K tok  │  75.0% acc  │  4,587 tokens
+XML            ██████████░░░░░░░░░░   13.8 acc%/1K tok  │  72.1% acc  │  5,221 tokens
+```
+
+<Note>
+**Efficiency score** = (Accuracy % ÷ Tokens) × 1,000. Higher is better.
+
+TOON achieves **76.4%** accuracy (vs JSON's 75.0%) while using **39.9% fewer tokens**.
+</Note>
+
+**CSV Note**: Excluded from ranking as it only supports 109 of 209 questions (flat tabular data only). While CSV is highly token-efficient for simple tabular data, it cannot represent nested structures.
+
+### Models Tested
+
+- `claude-haiku-4-5-20251001`
+- `gemini-3-flash-preview`
+- `gpt-5-nano`
+- `grok-4-1-fast-non-reasoning`
+
+### Per-Model Accuracy
+
+Accuracy across 4 LLMs on 209 data retrieval questions:
+
+<Accordion title="claude-haiku-4-5-20251001">
+```
+→ TOON           ████████████░░░░░░░░    59.8% (125/209)
+  JSON           ███████████░░░░░░░░░    57.4% (120/209)
+  YAML           ███████████░░░░░░░░░    56.0% (117/209)
+  XML            ███████████░░░░░░░░░    55.5% (116/209)
+  JSON compact   ███████████░░░░░░░░░    55.0% (115/209)
+  CSV            ██████████░░░░░░░░░░    50.5% (55/109)
+```
+</Accordion>
+
+<Accordion title="gemini-3-flash-preview">
+```
+  XML            ████████████████████    98.1% (205/209)
+  JSON           ███████████████████░    97.1% (203/209)
+  YAML           ███████████████████░    97.1% (203/209)
+→ TOON           ███████████████████░    96.7% (202/209)
+  JSON compact   ███████████████████░    96.7% (202/209)
+  CSV            ███████████████████░    96.3% (105/109)
+```
+</Accordion>
+
+<Accordion title="gpt-5-nano">
+```
+→ TOON           ██████████████████░░    90.9% (190/209)
+  JSON compact   ██████████████████░░    90.9% (190/209)
+  JSON           ██████████████████░░    89.0% (186/209)
+  CSV            ██████████████████░░    89.0% (97/109)
+  YAML           █████████████████░░░    87.1% (182/209)
+  XML            ████████████████░░░░    80.9% (169/209)
+```
+</Accordion>
+
+<Accordion title="grok-4-1-fast-non-reasoning">
+```
+→ TOON           ████████████░░░░░░░░    58.4% (122/209)
+  YAML           ████████████░░░░░░░░    57.9% (121/209)
+  JSON           ███████████░░░░░░░░░    56.5% (118/209)
+  XML            ███████████░░░░░░░░░    54.1% (113/209)
+  JSON compact   ██████████░░░░░░░░░░    52.2% (109/209)
+  CSV            ██████████░░░░░░░░░░    51.4% (56/109)
+```
+</Accordion>
+
+### Datasets Tested
+
+Eleven datasets designed to test different structural patterns and validation capabilities:
+
+#### Primary Datasets
+
+| Dataset | Rows | Structure | Tabular Eligibility | CSV Support |
+|---------|------|-----------|---------------------|-------------|
+| Uniform employee records | 100 | uniform | 100% | ✓ |
+| E-commerce orders with nested structures | 54 | nested | 33% | ✗ |
+| Time-series analytics data | 60 | uniform | 100% | ✓ |
+| Top 100 GitHub repositories | 100 | uniform | 100% | ✓ |
+| Semi-uniform event logs | 75 | semi-uniform | 50% | ✗ |
+| Deeply nested configuration | 11 | deep | 0% | ✗ |
+
+**Structure classes:**
+- **uniform**: All objects have identical fields with primitive values
+- **semi-uniform**: Mix of uniform and non-uniform structures  
+- **nested**: Objects with nested structures (nested objects or arrays)
+- **deep**: Highly nested with minimal tabular eligibility
+
+#### Structural Validation Datasets
+
+Test ability to detect incomplete, truncated, or corrupted data:
+
+1. **Control**: Valid complete dataset (baseline)
+2. **Truncated**: Array with 3 rows removed from end (tests `[N]` length detection)
+3. **Extra rows**: Array with 3 additional rows beyond declared length
+4. **Width mismatch**: Inconsistent field count (missing salary in row 10)
+5. **Missing fields**: Systematic field omissions (no email in multiple rows)
+
+### Question Types
+
+209 questions generated dynamically across five categories:
+
+<Accordion title="Field Retrieval (33%)">
+Direct value lookups or values that can be read straight off a record:
+
+- "What is Alice's salary?" → `75000`
+- "How many items are in order ORD-0042?" → `3`
+- "What is the customer name for order ORD-0042?" → `John Doe`
+
+**Performance**: TOON 99.6%, JSON 99.3%, YAML 98.5%
+</Accordion>
+
+<Accordion title="Aggregation (30%)">
+Dataset-level totals and averages plus single-condition filters:
+
+- "How many employees work in Engineering?" → `17`
+- "What is the total revenue across all orders?" → `45123.50`
+- "How many employees have salary > 80000?" → `23`
+
+**Performance**: TOON 61.9%, JSON 61.9%, YAML 59.9%
+</Accordion>
+
+<Accordion title="Filtering (23%)">
+Multi-condition queries requiring compound logic:
+
+- "How many employees in Sales have salary > 80000?" → `5`
+- "How many active employees have more than 10 years of experience?" → `8`
+
+**Performance**: TOON 56.8%, JSON 53.1%, YAML 56.3%
+</Accordion>
+
+<Accordion title="Structure Awareness (12%)">
+Tests format-native structural affordances (TOON's `[N]` count and `{fields}`, CSV's header row):
+
+- "How many employees are in the dataset?" → `100`
+- "List the field names for employees" → `id, name, email, department, salary`
+- "What is the department of the last employee?" → `Sales`
+
+**Performance**: TOON 89.0%, JSON 87.0%, YAML 84.0%
+</Accordion>
+
+<Accordion title="Structural Validation (2%)">
+Tests ability to detect incomplete, truncated, or corrupted data:
+
+- "Is this data complete and valid?" → `YES` (control) or `NO` (corrupted)
+- Tests TOON's `[N]` length validation and `{fields}` consistency checking
+- Demonstrates CSV's lack of structural validation capabilities
+
+**Performance**: TOON 70.0%, JSON 60.0%, XML 85.0%
+</Accordion>
+
+### Evaluation Process
+
+1. **Format conversion**: Each dataset converted to all 6 formats (TOON, JSON, YAML, JSON compact, XML, CSV)
+2. **Query LLM**: Each model receives formatted data + question in a prompt and extracts the answer
+3. **Validate deterministically**: Answers validated using type-aware comparison (e.g., `50000` = `$50,000`, `Engineering` = `engineering`) without requiring an LLM judge
+
+## Token Efficiency Benchmark
+
+Measures token count reduction across different data structures and formats.
+
+### Mixed-Structure Track
+
+Datasets with nested or semi-uniform structures (CSV excluded):
+
+<Accordion title="E-commerce orders with nested structures (33% tabular)">
+```
+TOON                █████████████░░░░░░░    73,126 tokens
+├─ vs JSON          (−33.3%)               109,599 tokens
+├─ vs JSON compact  (+5.3%)                 69,459 tokens
+├─ vs YAML          (−14.4%)                85,415 tokens
+└─ vs XML           (−40.7%)               123,344 tokens
+```
+
+Nested customer objects and item arrays demonstrate TOON's efficiency with partially tabular data.
+</Accordion>
+
+<Accordion title="Semi-uniform event logs (50% tabular)">
+```
+TOON                █████████████████░░░   154,084 tokens
+├─ vs JSON          (−15.0%)               181,201 tokens
+├─ vs JSON compact  (+19.9%)               128,529 tokens
+├─ vs YAML          (−0.8%)                155,397 tokens
+└─ vs XML           (−25.2%)               205,859 tokens
+```
+
+Mix of flat logs and nested error objects shows TOON performs comparably to YAML on mixed structures.
+</Accordion>
+
+<Accordion title="Deeply nested configuration (0% tabular)">
+```
+TOON                ██████████████░░░░░░       620 tokens
+├─ vs JSON          (−31.9%)                   911 tokens
+├─ vs JSON compact  (+11.1%)                   558 tokens
+├─ vs YAML          (−6.3%)                    662 tokens
+└─ vs XML           (−38.2%)                 1,003 tokens
+```
+
+Deep nesting with minimal tabular eligibility - JSON compact is more efficient for this structure.
+</Accordion>
+
+**Mixed-Structure Total:**
+```
+TOON                ████████████████░░░░   227,830 tokens
+├─ vs JSON          (−21.9%)               291,711 tokens
+├─ vs JSON compact  (+14.7%)               198,546 tokens
+├─ vs YAML          (−5.7%)                241,474 tokens
+└─ vs XML           (−31.0%)               330,206 tokens
+```
+
+### Flat-Only Track
+
+Datasets with flat tabular structures (CSV included):
+
+<Accordion title="Uniform employee records (100% tabular)">
+```
+CSV                 ███████████████████░    47,102 tokens
+TOON                ████████████████████    49,919 tokens   (+6.0% vs CSV)
+├─ vs JSON          (−60.7%)               127,063 tokens
+├─ vs JSON compact  (−36.9%)                79,059 tokens
+├─ vs YAML          (−50.1%)               100,011 tokens
+└─ vs XML           (−65.9%)               146,579 tokens
+```
+
+TOON adds ~6% overhead vs CSV but provides structure (array length, field headers, delimiter scoping) that improves LLM reliability.
+</Accordion>
+
+<Accordion title="Time-series analytics data (100% tabular)">
+```
+CSV                 ██████████████████░░     8,383 tokens
+TOON                ████████████████████     9,115 tokens   (+8.7% vs CSV)
+├─ vs JSON          (−59.0%)                22,245 tokens
+├─ vs JSON compact  (−35.9%)                14,211 tokens
+├─ vs YAML          (−49.0%)                17,858 tokens
+└─ vs XML           (−65.8%)                26,616 tokens
+```
+
+Time-series data shows similar CSV overhead with massive savings vs traditional formats.
+</Accordion>
+
+<Accordion title="Top 100 GitHub repositories (100% tabular)">
+```
+CSV                 ███████████████████░     8,512 tokens
+TOON                ████████████████████     8,744 tokens   (+2.7% vs CSV)
+├─ vs JSON          (−42.3%)                15,144 tokens
+├─ vs JSON compact  (−23.7%)                11,454 tokens
+├─ vs YAML          (−33.4%)                13,128 tokens
+└─ vs XML           (−48.9%)                17,095 tokens
+```
+
+Real-world GitHub data demonstrates TOON's minimal overhead vs CSV on uniform structures.
+</Accordion>
+
+**Flat-Only Total:**
+```
+CSV                 ███████████████████░    63,997 tokens
+TOON                ████████████████████    67,778 tokens   (+5.9% vs CSV)
+├─ vs JSON          (−58.8%)               164,452 tokens
+├─ vs JSON compact  (−35.3%)               104,724 tokens
+├─ vs YAML          (−48.3%)               130,997 tokens
+└─ vs XML           (−64.4%)               190,290 tokens
+```
+
+## Key Findings
+
+### When TOON Excels
+
+1. **Uniform arrays of objects (100% tabular eligibility)**
+   - 35-60% token savings vs JSON
+   - 5-10% overhead vs CSV, but with structural validation
+   - Best accuracy-per-token efficiency
+
+2. **Partially tabular data (30-60% eligibility)**
+   - 15-35% token savings vs JSON
+   - Comparable to YAML on semi-uniform structures
+   - Better structure awareness than JSON
+
+3. **LLM comprehension**
+   - Highest accuracy-per-token ratio (27.7 vs JSON's 16.4)
+   - 76.4% accuracy with 39.9% fewer tokens
+   - Explicit `[N]` and `{fields}` improve structure awareness
+
+### When Other Formats Are Better
+
+1. **Deeply nested structures (0% tabular eligibility)**
+   - JSON compact uses fewer tokens
+   - TOON adds ~11% overhead for deep nesting
+
+2. **Pure tabular data with no validation needs**
+   - CSV is 5-10% more compact
+   - TOON's structural metadata adds minimal overhead
+
+3. **Semi-uniform arrays (40-60% eligibility)**
+   - Token savings diminish
+   - JSON compact may be more efficient
+
+<Tip>
+Benchmark your specific use case to determine the best format. Use the [TOON Playground](https://toonformat.dev/playground) to compare token counts for your data.
+</Tip>
+
+## Running Benchmarks Locally
+
+You can run these benchmarks yourself or test your own datasets:
+
+```bash
+# Token efficiency benchmark
+pnpm benchmark:tokens
+
+# Retrieval accuracy benchmark (requires API keys)
+pnpm benchmark:accuracy
+```
+
+See the [benchmarks README](https://github.com/toon-format/toon/tree/main/benchmarks) for detailed setup instructions.

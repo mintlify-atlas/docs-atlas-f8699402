@@ -1,0 +1,268 @@
+---
+title: What is TOON?
+description: Understanding Token-Oriented Object Notation and how it reduces token costs for LLM applications
+---
+
+# What is TOON?
+
+**Token-Oriented Object Notation (TOON)** is a compact, human-readable encoding of the JSON data model that minimizes tokens and makes structure easy for models to follow. It's intended for **LLM input** as a drop-in, lossless representation of your existing JSON.
+
+## The Problem: JSON is Token-Expensive
+
+AI is becoming cheaper and more accessible, but **LLM tokens still cost money**. Standard JSON is verbose and repeats field names for every record:
+
+```json
+{
+  "users": [
+    { "id": 1, "name": "Alice", "role": "admin" },
+    { "id": 2, "name": "Bob", "role": "user" }
+  ]
+}
+```
+
+For a dataset with 100 users, you'd repeat `"id":`, `"name":`, and `"role":` 100 times. This redundancy adds up quickly in larger datasets.
+
+## The TOON Solution: Declare Once, Stream Compact
+
+TOON eliminates this redundancy by declaring structure once and streaming data as rows:
+
+```yaml
+users[2]{id,name,role}:
+  1,Alice,admin
+  2,Bob,user
+```
+
+<CardGroup cols={2}>
+  <Card title="Field Declaration" icon="table-columns">
+    The `{id,name,role}` header declares field names **once** for the entire array
+  </Card>
+  <Card title="Length Validation" icon="hashtag">
+    The `[2]` declares array length, helping LLMs detect truncation
+  </Card>
+  <Card title="Compact Rows" icon="list">
+    Each row is just comma-separated values—no repeated keys
+  </Card>
+  <Card title="CSV-like Efficiency" icon="compress">
+    Achieves CSV-like compactness while remaining fully lossless JSON
+  </Card>
+</CardGroup>
+
+## How TOON Combines Formats
+
+TOON strategically combines the best aspects of multiple formats:
+
+<Accordion title="YAML-Style Indentation for Objects">
+  Nested objects use indentation instead of braces, eliminating `{` and `}` tokens:
+
+  ```yaml
+  context:
+    task: Our favorite hikes together
+    location: Boulder
+    season: spring_2025
+  ```
+
+  Keys are followed by `: ` (colon-space), and values can be unquoted when safe.
+</Accordion>
+
+<Accordion title="CSV-Style Tables for Uniform Arrays">
+  Arrays of objects with identical fields collapse into tabular format:
+
+  ```yaml
+  hikes[3]{id,name,distanceKm,elevationGain,companion,wasSunny}:
+    1,Blue Lake Trail,7.5,320,ana,true
+    2,Ridge Overlook,9.2,540,luis,false
+    3,Wildflower Loop,5.1,180,sam,true
+  ```
+
+  This achieves CSV-like compactness while adding explicit structure that improves LLM reliability.
+</Accordion>
+
+<Accordion title="Inline Format for Primitive Arrays">
+  Simple arrays of strings, numbers, or booleans render inline:
+
+  ```yaml
+  friends[3]: ana,luis,sam
+  ```
+
+  The `[3]` length declaration provides validation, and values are comma-separated by default.
+</Accordion>
+
+## Real-World Example
+
+Here's how TOON handles mixed data structures:
+
+<CodeGroup>
+```json JSON (235 tokens)
+{
+  "context": {
+    "task": "Our favorite hikes together",
+    "location": "Boulder",
+    "season": "spring_2025"
+  },
+  "friends": ["ana", "luis", "sam"],
+  "hikes": [
+    {
+      "id": 1,
+      "name": "Blue Lake Trail",
+      "distanceKm": 7.5,
+      "elevationGain": 320,
+      "companion": "ana",
+      "wasSunny": true
+    },
+    {
+      "id": 2,
+      "name": "Ridge Overlook",
+      "distanceKm": 9.2,
+      "elevationGain": 540,
+      "companion": "luis",
+      "wasSunny": false
+    },
+    {
+      "id": 3,
+      "name": "Wildflower Loop",
+      "distanceKm": 5.1,
+      "elevationGain": 180,
+      "companion": "sam",
+      "wasSunny": true
+    }
+  ]
+}
+```
+
+```yaml TOON (106 tokens)
+context:
+  task: Our favorite hikes together
+  location: Boulder
+  season: spring_2025
+friends[3]: ana,luis,sam
+hikes[3]{id,name,distanceKm,elevationGain,companion,wasSunny}:
+  1,Blue Lake Trail,7.5,320,ana,true
+  2,Ridge Overlook,9.2,540,luis,false
+  3,Wildflower Loop,5.1,180,sam,true
+```
+</CodeGroup>
+
+<Note>
+  **55% token reduction**: TOON uses 106 tokens vs JSON's 235 tokens—a savings of 129 tokens (55%) for this example. The format automatically chooses the most efficient representation for each data structure.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Token-Efficient & Accurate" icon="chart-line">
+    TOON reaches **76.4% accuracy** (vs JSON's 75.0%) while using ~40% fewer tokens in mixed-structure benchmarks across 4 models
+  </Card>
+  
+  <Card title="JSON Data Model" icon="code">
+    Encodes the same objects, arrays, and primitives as JSON with **deterministic, lossless round-trips**
+  </Card>
+  
+  <Card title="LLM-Friendly Guardrails" icon="shield-check">
+    Explicit `[N]` lengths and `{fields}` headers give models a clear schema to follow, improving parsing reliability
+  </Card>
+  
+  <Card title="Minimal Syntax" icon="minimize">
+    Uses indentation instead of braces and minimizes quoting, giving YAML-like readability with CSV-style compactness
+  </Card>
+  
+  <Card title="Tabular Arrays" icon="table">
+    Uniform arrays of objects collapse into tables that declare fields once and stream row values line by line
+  </Card>
+  
+  <Card title="Multi-Language Ecosystem" icon="globe">
+    Spec-driven implementations in TypeScript, Python, Go, Rust, .NET, and other languages
+  </Card>
+</CardGroup>
+
+## Design Philosophy
+
+TOON's design prioritizes specific goals:
+
+1. **Make uniform arrays compact** — Declare structure once, stream data efficiently
+2. **Stay fully lossless** — Round-trips preserve all data: `decode(encode(x)) === x`
+3. **Keep parsing simple** — Explicit structure markers help both LLMs and humans
+4. **Provide validation guardrails** — Array lengths and field counts detect truncation and malformed output
+
+<Tip>
+  Think of TOON as a **translation layer**: use JSON programmatically, and encode it as TOON for LLM input. The format is stable but evolving—help shape it by contributing to the [spec](https://github.com/toon-format/spec).
+</Tip>
+
+## How It Works
+
+TOON automatically detects array structure and chooses the most efficient representation:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice', role: 'admin' },
+    { id: 2, name: 'Bob', role: 'user' }
+  ]
+}
+
+console.log(encode(data))
+// users[2]{id,name,role}:
+//   1,Alice,admin
+//   2,Bob,user
+```
+
+The encoder:
+1. Detects that `users` is an array of objects
+2. Verifies all objects have identical fields (`id`, `name`, `role`)
+3. Confirms all values are primitives (no nested objects/arrays)
+4. Chooses tabular format and generates the header
+5. Streams each object as a comma-separated row
+
+<Info>
+  **Lossless round-trips**: Decoding TOON back to JSON recovers the exact original structure. See [Format Overview](/concepts/format-overview) for complete syntax details.
+</Info>
+
+## What Makes TOON Different?
+
+<CardGroup cols={2}>
+  <Card title="vs JSON" icon="code">
+    **~40% fewer tokens** for mixed-structure data. TOON eliminates redundant field names in arrays while staying lossless.
+  </Card>
+  
+  <Card title="vs YAML" icon="file-lines">
+    **More compact for arrays**. YAML uses `- key: value` for each field. TOON uses tabular format to eliminate repetition.
+  </Card>
+  
+  <Card title="vs CSV" icon="table">
+    **Supports nested structures**. CSV only handles flat tables. TOON adds minimal overhead (~5-10%) while supporting full JSON.
+  </Card>
+  
+  <Card title="vs XML" icon="xml">
+    **Dramatically more compact**. XML's verbose tags make it the least token-efficient format for most data structures.
+  </Card>
+</CardGroup>
+
+## Media Type & File Extension
+
+By convention, TOON files use:
+- **File extension**: `.toon`
+- **Media type**: `text/toon`
+- **Encoding**: UTF-8 (always)
+
+The charset parameter may be specified (`text/toon; charset=utf-8`) but defaults to UTF-8 when omitted.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Format Overview" icon="book" href="/concepts/format-overview">
+    Learn the complete TOON syntax with detailed examples
+  </Card>
+  
+  <Card title="When to Use TOON" icon="compass" href="/concepts/when-to-use">
+    Understand when TOON excels and when to use alternatives
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install the library and start encoding your first dataset
+  </Card>
+  
+  <Card title="Benchmarks" icon="chart-bar" href="/advanced/benchmarks">
+    See detailed performance comparisons across formats
+  </Card>
+</CardGroup>

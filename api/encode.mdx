@@ -1,0 +1,130 @@
+---
+title: "encode"
+description: "Encodes a JavaScript value into TOON format string"
+---
+
+## Function Signature
+
+```typescript
+function encode(input: unknown, options?: EncodeOptions): string
+```
+
+Encodes a JavaScript value into TOON format string.
+
+## Parameters
+
+<ParamField path="input" type="unknown" required>
+  Any JavaScript value to encode (objects, arrays, primitives). The value will be normalized to JSON-compatible types.
+</ParamField>
+
+<ParamField path="options" type="EncodeOptions">
+  Optional encoding configuration.
+
+  <ParamField path="indent" type="number" default="2">
+    Number of spaces per indentation level.
+  </ParamField>
+
+  <ParamField path="delimiter" type="Delimiter" default="DELIMITERS.comma">
+    Delimiter to use for tabular array rows and inline primitive arrays.
+  </ParamField>
+
+  <ParamField path="keyFolding" type="'off' | 'safe'" default="'off'">
+    Enable key folding to collapse single-key wrapper chains. When set to `'safe'`, nested objects with single keys are collapsed into dotted paths (e.g., `data.metadata.items` instead of nested indentation).
+  </ParamField>
+
+  <ParamField path="flattenDepth" type="number" default="Infinity">
+    Maximum number of segments to fold when `keyFolding` is enabled. Controls how deep the folding can go in single-key chains. Values 0 or 1 have no practical effect (treated as effectively disabled).
+  </ParamField>
+
+  <ParamField path="replacer" type="EncodeReplacer">
+    A function to transform or filter values during encoding. Called for the root value and every nested property/element. Return `undefined` to omit properties/elements (root cannot be omitted).
+
+    ```typescript
+    type EncodeReplacer = (
+      key: string,
+      value: JsonValue,
+      path: readonly (string | number)[]
+    ) => unknown
+    ```
+  </ParamField>
+</ParamField>
+
+## Returns
+
+<ResponseField name="result" type="string">
+  TOON formatted string representing the input value.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```typescript Basic object
+import { encode } from 'toon';
+
+const result = encode({ name: 'Alice', age: 30 });
+console.log(result);
+// Output:
+// name: Alice
+// age: 30
+```
+
+```typescript Array of objects
+import { encode } from 'toon';
+
+const result = encode({ users: [{ id: 1 }, { id: 2 }] });
+console.log(result);
+// Output:
+// users[]:
+//   - id: 1
+//   - id: 2
+```
+
+```typescript Custom options
+import { encode } from 'toon';
+
+const data = {
+  metadata: {
+    version: '1.0',
+    author: 'Alice'
+  }
+};
+
+const result = encode(data, { 
+  indent: 4, 
+  keyFolding: 'safe' 
+});
+console.log(result);
+// Output:
+// metadata.version: 1.0
+// metadata.author: Alice
+```
+
+```typescript With replacer
+import { encode } from 'toon';
+
+const data = {
+  name: 'Alice',
+  password: 'secret123',
+  email: 'alice@example.com'
+};
+
+const result = encode(data, {
+  replacer: (key, value) => {
+    // Remove password fields
+    if (key === 'password') return undefined;
+    return value;
+  }
+});
+console.log(result);
+// Output:
+// name: Alice
+// email: alice@example.com
+```
+
+</CodeGroup>
+
+## Related Functions
+
+- [encodeLines](/api/encode-lines) - Stream encoding line-by-line for large outputs
+- [decode](/api/decode) - Decode TOON format back to JavaScript values

@@ -1,0 +1,614 @@
+---
+title: 'LLM Integration'
+description: 'Best practices for using TOON format with Large Language Models to maximize accuracy and minimize token costs'
+---
+
+## Overview
+
+TOON is designed specifically for LLM input. This guide covers strategies, prompting techniques, and validation approaches to get the most out of TOON format when working with Large Language Models.
+
+## Why TOON for LLMs?
+
+TOON provides three key advantages for LLM input:
+
+<CardGroup cols={3}>
+  <Card title="Token Efficiency" icon="minimize">
+    ~40% fewer tokens than JSON while maintaining lossless representation.
+  </Card>
+  
+  <Card title="LLM-Friendly Structure" icon="list-check">
+    Explicit length declarations `[N]` and field headers `{fields}` improve parsing accuracy.
+  </Card>
+  
+  <Card title="Human Readability" icon="eye">
+    YAML-like indentation and CSV-style tables are familiar and easy to verify.
+  </Card>
+</CardGroup>
+
+## Basic Integration
+
+### Simple Data Encoding
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const userData = {
+  users: [
+    { id: 1, name: 'Alice', role: 'admin', active: true },
+    { id: 2, name: 'Bob', role: 'user', active: true },
+    { id: 3, name: 'Carol', role: 'user', active: false }
+  ]
+}
+
+// Encode with tab delimiter for maximum token efficiency
+const toonData = encode(userData, { delimiter: DELIMITERS.tab })
+
+// Include in LLM prompt
+const prompt = `
+Here is user data:
+
+\`\`\`toon
+${toonData}
+\`\`\`
+
+How many active users are there?
+`
+
+const response = await llm.complete(prompt)
+```
+
+### Showing Format Instead of Describing
+
+LLMs understand TOON naturally when they see examples:
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const exampleData = {
+  products: [
+    { id: 1, name: 'Widget', price: 29.99, inStock: true },
+    { id: 2, name: 'Gadget', price: 19.99, inStock: false }
+  ]
+}
+
+const toon = encode(exampleData, { delimiter: DELIMITERS.tab })
+
+const prompt = `
+I'm providing data in TOON format (Token-Oriented Object Notation).
+
+Example:
+\`\`\`toon
+${toon}
+\`\`\`
+
+Please analyze this product inventory and tell me which items need restocking.
+`
+```
+
+<Note>
+  Don't explain TOON syntax in detail. LLMs parse it naturally from examples. The structure is self-documenting.
+</Note>
+
+## Optimal Formatting for LLMs
+
+### Use Tab Delimiters
+
+Tab delimiters provide the best token efficiency:
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const data = { /* your data */ }
+
+// Tab delimiter: ~5-10% fewer tokens than comma
+const toon = encode(data, { delimiter: DELIMITERS.tab })
+```
+
+**Token Comparison:**
+
+```
+Comma: users[2]{id,name,role}:\n  1,Alice,admin    (12 tokens)
+Tab:   users[2]{id,name,role}:\n  1\tAlice\tadmin   (11 tokens)
+Savings: ~8% reduction
+```
+
+### Enable Key Folding
+
+Collapse nested structures when appropriate:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const config = {
+  server: {
+    database: {
+      connection: {
+        host: 'localhost',
+        port: 5432
+      }
+    }
+  }
+}
+
+// Without key folding (more tokens)
+const verbose = encode(config)
+// server:
+//   database:
+//     connection:
+//       host: localhost
+//       port: 5432
+
+// With key folding (fewer tokens)
+const compact = encode(config, { keyFolding: 'safe' })
+// server.database.connection:
+//   host: localhost
+//   port: 5432
+```
+
+<Warning>
+  Only use key folding for LLM input. If you need to decode the output back to JSON, use `expandPaths: 'safe'` to ensure lossless round-trips.
+</Warning>
+
+## Prompting Strategies
+
+### Code Block Formatting
+
+Always wrap TOON data in code blocks:
+
+```typescript
+const prompt = `
+Analyze this dataset:
+
+\`\`\`toon
+${toonData}
+\`\`\`
+
+Question: What is the average age of active users?
+`
+```
+
+**Why this works:**
+- Models recognize structured data in code blocks
+- Preserves whitespace and formatting
+- Reduces ambiguity in parsing
+
+### Explicit Length Declarations
+
+TOON's `[N]` syntax helps LLMs validate completeness:
+
+```typescript
+import { encode } from '@toon-format/toon'
+
+const data = {
+  orders: [
+    { id: 1, total: 100 },
+    { id: 2, total: 200 },
+    { id: 3, total: 150 }
+  ]
+}
+
+const toon = encode(data)
+// orders[3]{id,total}:  ← Length declaration helps LLM know to expect 3 items
+//   1,100
+//   2,200
+//   3,150
+```
+
+LLMs can validate:
+- "Did I receive all 3 items?"
+- "Is the data complete or truncated?"
+
+### Field Headers for Structure
+
+Field headers `{id,name,role}` act as schema hints:
+
+```typescript
+const toon = `
+users[2]{id,name,role,active}:
+  1,Alice,admin,true
+  2,Bob,user,true
+`
+
+const prompt = `
+Given this user data:
+
+\`\`\`toon
+${toon}
+\`\`\`
+
+Extract the 'role' field for user with id=2.
+`
+// LLM sees field header and knows exactly where 'role' is positioned
+```
+
+## Requesting TOON Output
+
+When asking LLMs to generate TOON, provide header templates:
+
+### Specify Headers Explicitly
+
+```typescript
+const prompt = `
+Generate a list of 3 fictional products in TOON format.
+
+Use this structure:
+
+\`\`\`toon
+products[3]{id,name,price,category}:
+  <your data here>
+\`\`\`
+`
+
+const response = await llm.complete(prompt)
+```
+
+### Example-Based Generation
+
+```typescript
+const example = encode({
+  tasks: [
+    { id: 1, title: 'Write docs', done: false },
+    { id: 2, title: 'Run tests', done: true }
+  ]
+})
+
+const prompt = `
+Here's an example of TOON format:
+
+\`\`\`toon
+${example}
+\`\`\`
+
+Now generate 3 new tasks in the same format.
+`
+```
+
+<Tip>
+  When requesting TOON output, show the exact header format you expect. LLMs will match the structure more reliably.
+</Tip>
+
+## Validation and Parsing
+
+### Validating LLM Output
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const llmResponse = `
+users[2]{id,name}:
+  1,Alice
+  2,Bob
+`
+
+try {
+  const data = decode(llmResponse, { strict: true })
+  console.log('Valid TOON:', data)
+} catch (error) {
+  console.error('Invalid TOON output:', error.message)
+  // Handle validation error
+}
+```
+
+### Extracting TOON from Text
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+const llmResponse = `
+Here's the data you requested:
+
+\`\`\`toon
+users[2]{id,name}:
+  1,Alice
+  2,Bob
+\`\`\`
+
+This dataset contains 2 users.
+`
+
+// Extract TOON code block
+const match = llmResponse.match(/```toon\n([\s\S]*?)\n```/)
+if (match) {
+  const toon = match[1]
+  const data = decode(toon)
+  console.log(data)
+}
+```
+
+### Handling Malformed Output
+
+```typescript
+import { decode } from '@toon-format/toon'
+
+async function parseLLMOutput(response: string, retries = 2) {
+  const match = response.match(/```toon\n([\s\S]*?)\n```/)
+  if (!match) {
+    throw new Error('No TOON block found in response')
+  }
+  
+  const toon = match[1]
+  
+  try {
+    return decode(toon, { strict: true })
+  } catch (error) {
+    if (retries > 0) {
+      console.log('Validation failed, requesting correction...')
+      const fixPrompt = `
+The previous TOON output was invalid:
+\`\`\`toon
+${toon}
+\`\`\`
+
+Error: ${error.message}
+
+Please provide corrected TOON output.
+      `
+      const fixedResponse = await llm.complete(fixPrompt)
+      return parseLLMOutput(fixedResponse, retries - 1)
+    }
+    throw error
+  }
+}
+```
+
+## Real-World Integration Examples
+
+### RAG (Retrieval-Augmented Generation)
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+async function queryWithContext(question: string) {
+  // Retrieve relevant documents
+  const docs = await vectorDB.search(question, { limit: 10 })
+  
+  // Encode as TOON for token efficiency
+  const context = encode({ documents: docs }, { delimiter: DELIMITERS.tab })
+  
+  const prompt = `
+Context:
+
+\`\`\`toon
+${context}
+\`\`\`
+
+Question: ${question}
+
+Answer based on the context above.
+  `
+  
+  return await llm.complete(prompt)
+}
+```
+
+### Multi-Turn Conversations
+
+```typescript
+import { encode, decode, DELIMITERS } from '@toon-format/toon'
+
+class ConversationManager {
+  private history: any[] = []
+  
+  async addMessage(role: string, content: any) {
+    this.history.push({ role, content, timestamp: Date.now() })
+  }
+  
+  async generatePrompt() {
+    // Encode conversation history as TOON
+    const historyTOON = encode(
+      { messages: this.history },
+      { delimiter: DELIMITERS.tab }
+    )
+    
+    return `
+Conversation history:
+
+\`\`\`toon
+${historyTOON}
+\`\`\`
+
+Continue the conversation naturally.
+    `
+  }
+}
+```
+
+### Structured Data Extraction
+
+```typescript
+import { encode, decode, DELIMITERS } from '@toon-format/toon'
+
+async function extractStructuredData(text: string) {
+  const prompt = `
+Extract entities from this text:
+
+"${text}"
+
+Provide output in TOON format:
+
+\`\`\`toon
+entities[N]{type,value,confidence}:
+  <extracted entities>
+\`\`\`
+  `
+  
+  const response = await llm.complete(prompt)
+  
+  // Parse TOON output
+  const match = response.match(/```toon\n([\s\S]*?)\n```/)
+  if (match) {
+    return decode(match[1])
+  }
+  
+  throw new Error('Failed to extract structured data')
+}
+```
+
+### Batch Processing
+
+```typescript
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+async function batchAnalysis(items: any[]) {
+  // Encode large dataset
+  const toon = encode(
+    { items },
+    { delimiter: DELIMITERS.tab, keyFolding: 'safe' }
+  )
+  
+  const prompt = `
+Analyze this dataset:
+
+\`\`\`toon
+${toon}
+\`\`\`
+
+Provide summary statistics:
+- Total count
+- Average values
+- Any anomalies
+  `
+  
+  return await llm.complete(prompt)
+}
+```
+
+## Token Cost Optimization
+
+### Calculate Token Savings
+
+```typescript
+import { encode } from '@toon-format/toon'
+import { encode as encodeGPT } from 'gpt-tokenizer'
+
+function compareTokens(data: any) {
+  const json = JSON.stringify(data, null, 2)
+  const toon = encode(data, { delimiter: '\t' })
+  
+  const jsonTokens = encodeGPT(json).length
+  const toonTokens = encodeGPT(toon).length
+  const saved = jsonTokens - toonTokens
+  const percent = (saved / jsonTokens) * 100
+  
+  return {
+    json: jsonTokens,
+    toon: toonTokens,
+    saved,
+    percent: percent.toFixed(1)
+  }
+}
+
+const data = { /* your data */ }
+const stats = compareTokens(data)
+console.log(`Token savings: ${stats.saved} (${stats.percent}%)`)
+```
+
+### Cost Estimation
+
+```typescript
+function estimateCost(data: any, pricePerMillion: number) {
+  const stats = compareTokens(data)
+  
+  const jsonCost = (stats.json / 1_000_000) * pricePerMillion
+  const toonCost = (stats.toon / 1_000_000) * pricePerMillion
+  
+  return {
+    jsonCost: jsonCost.toFixed(4),
+    toonCost: toonCost.toFixed(4),
+    savings: (jsonCost - toonCost).toFixed(4)
+  }
+}
+
+const pricing = estimateCost(data, 1.50)  // $1.50 per million tokens
+console.log(`Cost with JSON: $${pricing.jsonCost}`)
+console.log(`Cost with TOON: $${pricing.toonCost}`)
+console.log(`Savings: $${pricing.savings}`)
+```
+
+## Benchmark Results
+
+From the [README benchmarks](/advanced/benchmarks):
+
+- **Token Efficiency:** TOON uses ~40% fewer tokens than JSON on mixed-structure datasets
+- **Accuracy:** 76.4% accuracy vs JSON's 75.0% across 209 questions and 4 models
+- **Efficiency Score:** 27.7 accuracy%/1K tokens (best among all formats tested)
+
+<Note>
+  See full benchmark methodology and results in the [README](https://github.com/toon-format/toon#benchmarks).
+</Note>
+
+## Best Practices
+
+<Steps>
+  <Step title="Use tab delimiters">
+    Set `delimiter: DELIMITERS.tab` for ~5-10% additional token savings.
+  </Step>
+  
+  <Step title="Wrap in code blocks">
+    Always use ` ```toon ` code blocks when including TOON in prompts.
+  </Step>
+  
+  <Step title="Show, don't describe">
+    Provide examples instead of explaining TOON syntax.
+  </Step>
+  
+  <Step title="Validate output">
+    Use strict mode to catch malformed LLM responses early.
+  </Step>
+  
+  <Step title="Monitor token usage">
+    Track actual token counts and cost savings in production.
+  </Step>
+</Steps>
+
+<CardGroup cols={2}>
+  <Card title="Token efficiency" icon="coins">
+    Tab delimiters + key folding maximize token savings.
+  </Card>
+  
+  <Card title="Structure validation" icon="shield-check">
+    Length declarations `[N]` and field headers `{fields}` improve LLM accuracy.
+  </Card>
+  
+  <Card title="Round-trip safety" icon="rotate">
+    Use `expandPaths: 'safe'` when decoding if encoded with `keyFolding: 'safe'`.
+  </Card>
+  
+  <Card title="Format familiarity" icon="book">
+    CSV-like tables and YAML-like indentation are naturally understood.
+  </Card>
+</CardGroup>
+
+## When to Use TOON
+
+<CardGroup cols={2}>
+  <Card title="✓ Uniform arrays" icon="check" color="#10b981">
+    Large arrays of objects with consistent fields (tabular data).
+  </Card>
+  
+  <Card title="✓ Token-sensitive apps" icon="check" color="#10b981">
+    Applications where token costs matter (RAG, long contexts).
+  </Card>
+  
+  <Card title="✓ Structured output" icon="check" color="#10b981">
+    When requesting structured data from LLMs.
+  </Card>
+  
+  <Card title="✗ Deeply nested" icon="xmark" color="#ef4444">
+    Highly nested structures may be better as compact JSON.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Encoding Guide" icon="arrow-right" href="/guides/encoding">
+  Learn all encoding options and transformations
+</Card>
+
+<Card title="CLI Usage" icon="arrow-right" href="/guides/cli">
+  Use command-line tools for quick conversions
+</Card>
+
+<Card title="Streaming" icon="arrow-right" href="/guides/streaming">
+  Process large datasets efficiently
+</Card>

@@ -1,0 +1,429 @@
+---
+title: Performance
+description: Performance characteristics, optimization strategies, and best practices for using TOON efficiently in production
+---
+
+TOON is designed for token efficiency, but performance considerations extend beyond token count. This guide covers latency, throughput, memory usage, and optimization strategies for production use.
+
+## Performance Characteristics
+
+### Token Efficiency vs. Processing Speed
+
+TOON reduces token count significantly (35-60% vs JSON for uniform arrays), but encoding/decoding has computational overhead:
+
+- **Encoding**: Analyzing array uniformity and building tabular structures
+- **Decoding**: Parsing headers, validating lengths, and reconstructing objects
+
+<Note>
+For latency-critical applications, **measure end-to-end response time** on your exact setup. Some deployments (especially local/quantized models) may process compact JSON faster despite higher token count.
+</Note>
+
+### Performance Trade-offs
+
+The optimal format depends on your bottleneck:
+
+| Bottleneck | Best Format | Reason |
+|------------|-------------|--------|
+| **API costs** | TOON | Minimizes tokens ($$) |
+| **Context limits** | TOON | Fits more data in window |
+| **Network transfer** | JSON compact | Smaller bytes over wire |
+| **Parsing speed** | JSON | Simpler structure |
+| **Local inference** | Benchmark both | Token/sec varies by model |
+
+<Tip>
+For cloud LLM APIs (OpenAI, Anthropic, etc.), **TOON almost always wins** due to token-based pricing. For local models, test both formats with your specific model.
+</Tip>
+
+## Memory Usage
+
+### Encoding
+
+TOON encoding builds the full output string in memory:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+// ⚠️ Loads entire output into memory
+const toonString = encode(largeData)
+```
+
+**For large datasets, use streaming encoding:**
+
+```ts
+import { encodeLines } from '@toon-format/toon'
+
+// ✅ Memory-efficient: yields lines one at a time
+for (const line of encodeLines(largeData)) {
+  process.stdout.write(`${line}\n`)
+  // or: await writeToFile(line)
+}
+```
+
+### Decoding
+
+TOON decoding builds the full object tree in memory:
+
+```ts
+import { decode } from '@toon-format/toon'
+
+// ⚠️ Loads entire object tree into memory
+const data = decode(toonString)
+```
+
+**For large datasets, use streaming decoding:**
+
+```ts
+import { decodeStream } from '@toon-format/toon'
+
+// ✅ Memory-efficient: processes events one at a time
+for await (const event of decodeStream(lines)) {
+  if (event.type === 'primitive') {
+    console.log(event.value)
+  }
+  // Custom processing without building full tree
+}
+```
+
+<Accordion title="Streaming Decode Event Types">
+The `decodeStream` API yields structured JSON events:
+
+- `{ type: 'startObject' }` - Object begins
+- `{ type: 'endObject' }` - Object ends
+- `{ type: 'startArray', length: number }` - Array begins (length from `[N]`)
+- `{ type: 'endArray' }` - Array ends
+- `{ type: 'key', key: string, wasQuoted?: boolean }` - Object key
+- `{ type: 'primitive', value: JsonPrimitive }` - Primitive value
+
+See the [API Reference](/api/encode) for details.
+</Accordion>
+
+## Optimization Strategies
+
+### 1. Use Tab Delimiters for Maximum Efficiency
+
+Comma is the default delimiter, but **tab is more token-efficient**:
+
+```ts
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] }
+
+// Comma delimiter (default)
+const commaEncoded = encode(data)
+// users[2]{id,name}:
+//   1,Alice
+//   2,Bob
+
+// Tab delimiter (more efficient)
+const tabEncoded = encode(data, { delimiter: DELIMITERS.tab })
+// users[2]{id\tname}:
+//   1\tAlice
+//   2\tBob
+```
+
+<Tip>
+**Tab saves ~5-10% tokens** on tabular arrays. Use it for production LLM inputs where you control encoding and don't need human readability.
+</Tip>
+
+### 2. Enable Key Folding for Nested Objects
+
+Key folding collapses single-key wrapper chains into dotted paths:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  api: {
+    config: {
+      timeout: 5000
+    }
+  }
+}
+
+// Without key folding (default)
+encode(data)
+// api:
+//   config:
+//     timeout: 5000
+
+// With key folding
+encode(data, { keyFolding: 'safe' })
+// api.config.timeout: 5000
+```
+
+**Savings:** ~30-40% tokens on deeply nested configuration objects.
+
+<Note>
+`keyFolding: 'safe'` only folds when all segments are valid identifiers. Set `expandPaths: 'safe'` when decoding to reconstruct the original structure.
+</Note>
+
+### 3. Use Streaming for Large Datasets
+
+Streaming encoding/decoding prevents memory spikes:
+
+```ts
+import { encodeLines, decodeStream } from '@toon-format/toon'
+
+// Streaming encode (thousands of records)
+const largeData = await fetchThousandsOfRecords()
+for (const line of encodeLines(largeData)) {
+  await writeToLLMStream(line)
+}
+
+// Streaming decode (large LLM responses)
+const lines = splitLLMResponseToLines(response)
+for await (const event of decodeStream(lines)) {
+  // Process events without building full tree
+  if (event.type === 'primitive') {
+    await processValue(event.value)
+  }
+}
+```
+
+### 4. Control Indentation for Compact Output
+
+TOON defaults to 2-space indentation. Use 0 spaces for maximum compactness:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [
+    { id: 1, name: 'Alice' },
+    { id: 2, name: 'Bob' }
+  ]
+}
+
+// Default (2 spaces)
+encode(data)
+// users[2]{id,name}:
+//   1,Alice
+//   2,Bob
+
+// Compact (0 spaces)
+encode(data, { indent: 0 })
+// users[2]{id,name}:
+// 1,Alice
+// 2,Bob
+```
+
+**Savings:** ~3-5% tokens on deeply nested structures.
+
+<Note>
+Zero indentation reduces readability. Use it only when token count is critical and human inspection isn't needed.
+</Note>
+
+### 5. Filter Data with Replacer Function
+
+Remove unnecessary fields before encoding to reduce token count:
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const users = [
+  { id: 1, name: 'Alice', password: 'secret', internal_id: 'x123' },
+  { id: 2, name: 'Bob', password: 'secret', internal_id: 'x456' }
+]
+
+// Remove sensitive/unnecessary fields
+const safe = encode({ users }, {
+  replacer: (key, value) => {
+    if (key === 'password' || key === 'internal_id') {
+      return undefined // Omit field
+    }
+    return value
+  }
+})
+// users[2]{id,name}:
+//   1,Alice
+//   2,Bob
+```
+
+See [Replacer Function](/advanced/replacer-function) for more examples.
+
+## Latency Considerations
+
+### Time to First Token (TTFT)
+
+TOON's structured headers may slightly increase TTFT:
+
+- **JSON**: Model starts generating immediately
+- **TOON**: Model must emit array header (`[N]{fields}:`) before first row
+
+<Tip>
+**Impact is minimal** (typically less than 50ms). The token savings (35-60%) far outweigh the header overhead for most use cases.
+</Tip>
+
+### Tokens per Second
+
+Some models process simpler structures faster:
+
+| Scenario | Recommendation |
+|----------|----------------|
+| **Cloud APIs** | Use TOON (token-based pricing) |
+| **Local models** | Benchmark both formats |
+| **Streaming output** | Test TTFT and tokens/sec |
+
+```bash
+# Benchmark example (pseudo-code)
+time curl -X POST api/generate -d '{"prompt": "...", "format": "toon"}'
+time curl -X POST api/generate -d '{"prompt": "...", "format": "json"}'
+```
+
+## Production Best Practices
+
+### 1. Cache Encoded Outputs
+
+If encoding the same data repeatedly, cache the TOON output:
+
+```ts
+const cache = new Map<string, string>()
+
+function getEncodedData(key: string, data: unknown): string {
+  if (!cache.has(key)) {
+    cache.set(key, encode(data, { delimiter: DELIMITERS.tab }))
+  }
+  return cache.get(key)!
+}
+```
+
+### 2. Validate Input Data
+
+TOON encoding assumes valid JSON data model. Validate inputs to prevent encoding errors:
+
+```ts
+import { encode } from '@toon-format/toon'
+import { z } from 'zod'
+
+const UserSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string().email()
+})
+
+function encodeUsers(users: unknown[]): string {
+  const validated = users.map(u => UserSchema.parse(u))
+  return encode({ users: validated })
+}
+```
+
+### 3. Monitor Token Usage
+
+Track token savings in production:
+
+```ts
+import { encode as encodeTOON } from '@toon-format/toon'
+import { encode as countTokens } from 'gpt-tokenizer'
+
+function logTokenSavings(data: unknown) {
+  const jsonStr = JSON.stringify(data, null, 2)
+  const toonStr = encodeTOON(data)
+  
+  const jsonTokens = countTokens(jsonStr).length
+  const toonTokens = countTokens(toonStr).length
+  const savings = ((jsonTokens - toonTokens) / jsonTokens * 100).toFixed(1)
+  
+  console.log(`Token savings: ${savings}% (${jsonTokens} → ${toonTokens})`)
+}
+```
+
+### 4. Use Strict Mode for Production
+
+Strict mode validates array lengths and tabular row counts during decoding:
+
+```ts
+import { decode } from '@toon-format/toon'
+
+// Strict mode (default) - validates [N] lengths
+const data = decode(toonString, { strict: true })
+
+// Non-strict mode - skips validation
+const data = decode(toonString, { strict: false })
+```
+
+<Tip>
+Use `strict: true` (default) in production to catch corrupted or truncated data. Disable only for testing or when processing known-good inputs.
+</Tip>
+
+### 5. Handle Decode Errors Gracefully
+
+Wrap decode calls in try-catch for production:
+
+```ts
+import { decode } from '@toon-format/toon'
+
+function safeDecode(toonString: string): unknown | null {
+  try {
+    return decode(toonString, { strict: true })
+  } catch (error) {
+    console.error('TOON decode failed:', error)
+    // Fallback to JSON or return null
+    return null
+  }
+}
+```
+
+## Performance Checklist
+
+<Accordion title="Encoding">
+- [ ] Use tab delimiter for production (`delimiter: DELIMITERS.tab`)
+- [ ] Enable key folding for nested configs (`keyFolding: 'safe'`)
+- [ ] Use streaming for large datasets (`encodeLines()`)
+- [ ] Filter unnecessary fields with replacer function
+- [ ] Cache encoded outputs when possible
+- [ ] Reduce indentation if tokens are critical (`indent: 0`)
+</Accordion>
+
+<Accordion title="Decoding">
+- [ ] Use streaming for large inputs (`decodeStream()`)
+- [ ] Enable strict mode in production (`strict: true`)
+- [ ] Handle decode errors gracefully (try-catch)
+- [ ] Enable path expansion if using key folding (`expandPaths: 'safe'`)
+</Accordion>
+
+<Accordion title="Production Monitoring">
+- [ ] Track token savings (TOON vs JSON)
+- [ ] Monitor encoding/decoding latency
+- [ ] Measure end-to-end response time
+- [ ] Validate memory usage with large datasets
+- [ ] Test with your specific model/tokenizer
+</Accordion>
+
+## Benchmarking Your Use Case
+
+Every use case is different. Benchmark with your actual data:
+
+```ts
+import { encode as encodeTOON, decode as decodeTOON } from '@toon-format/toon'
+import { encode as countTokens } from 'gpt-tokenizer'
+
+function benchmark(data: unknown) {
+  // Encoding performance
+  const encodeStart = performance.now()
+  const toonStr = encodeTOON(data, { delimiter: DELIMITERS.tab })
+  const encodeTime = performance.now() - encodeStart
+  
+  // Token count
+  const jsonTokens = countTokens(JSON.stringify(data, null, 2)).length
+  const toonTokens = countTokens(toonStr).length
+  
+  // Decoding performance
+  const decodeStart = performance.now()
+  const decoded = decodeTOON(toonStr)
+  const decodeTime = performance.now() - decodeStart
+  
+  console.log({
+    encodeTime: `${encodeTime.toFixed(2)}ms`,
+    decodeTime: `${decodeTime.toFixed(2)}ms`,
+    jsonTokens,
+    toonTokens,
+    savings: `${((jsonTokens - toonTokens) / jsonTokens * 100).toFixed(1)}%`
+  })
+}
+
+benchmark(yourData)
+```
+
+<Tip>
+Use the [TOON Playground](https://toonformat.dev/playground) to quickly compare token counts for your data without writing code.
+</Tip>

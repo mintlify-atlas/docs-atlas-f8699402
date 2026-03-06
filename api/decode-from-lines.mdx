@@ -1,0 +1,209 @@
+---
+title: "decodeFromLines"
+description: "Decodes TOON format from pre-split lines into a JavaScript value"
+---
+
+## Function Signature
+
+```typescript
+function decodeFromLines(lines: Iterable<string>, options?: DecodeOptions): JsonValue
+```
+
+Decodes TOON format from pre-split lines into a JavaScript value.
+
+This is a convenience wrapper around the streaming decoder that builds the full value in memory. Useful when you already have lines as an array or iterable and want the standard decode behavior with path expansion support.
+
+## Parameters
+
+<ParamField path="lines" type="Iterable<string>" required>
+  Iterable of TOON lines (without newlines). Can be an array, generator, or any iterable of strings.
+</ParamField>
+
+<ParamField path="options" type="DecodeOptions">
+  Optional decoding configuration.
+
+  <ParamField path="indent" type="number" default="2">
+    Number of spaces per indentation level. Must match the indentation used when encoding.
+  </ParamField>
+
+  <ParamField path="strict" type="boolean" default="true">
+    When `true`, enforce strict validation of array lengths and tabular row counts.
+  </ParamField>
+
+  <ParamField path="expandPaths" type="'off' | 'safe'" default="'off'">
+    Enable path expansion to reconstruct dotted keys into nested objects. When set to `'safe'`, keys containing dots are expanded into nested structures if all segments are valid identifiers (e.g., `data.metadata.items` becomes nested objects). Pairs with `keyFolding='safe'` for lossless round-trips.
+  </ParamField>
+</ParamField>
+
+## Returns
+
+<ResponseField name="result" type="JsonValue">
+  Parsed JavaScript value (object, array, or primitive).
+
+  ```typescript
+  type JsonValue = JsonPrimitive | JsonObject | JsonArray
+  type JsonPrimitive = string | number | boolean | null
+  type JsonObject = { [Key in string]: JsonValue }
+  type JsonArray = JsonValue[]
+  ```
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```typescript From array of lines
+import { decodeFromLines } from 'toon';
+
+const lines = ['name: Alice', 'age: 30'];
+const result = decodeFromLines(lines);
+
+console.log(result);
+// Output: { name: 'Alice', age: 30 }
+```
+
+```typescript From file stream (Node.js)
+import { decodeFromLines } from 'toon';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
+
+const fileStream = createReadStream('data.toon');
+const rl = createInterface({
+  input: fileStream,
+  crlfDelay: Infinity
+});
+
+const result = decodeFromLines(rl);
+console.log(result);
+```
+
+```typescript From generator
+import { decodeFromLines } from 'toon';
+
+function* generateLines() {
+  yield 'user:';
+  yield '  name: Alice';
+  yield '  age: 30';
+}
+
+const result = decodeFromLines(generateLines());
+console.log(result);
+// Output: { user: { name: 'Alice', age: 30 } }
+```
+
+```typescript With path expansion
+import { decodeFromLines } from 'toon';
+
+const lines = [
+  'data.metadata.version: 1.0',
+  'data.metadata.author: Alice'
+];
+
+const result = decodeFromLines(lines, { expandPaths: 'safe' });
+console.log(result);
+// Output:
+// {
+//   data: {
+//     metadata: {
+//       version: '1.0',
+//       author: 'Alice'
+//     }
+//   }
+// }
+```
+
+```typescript Non-strict mode
+import { decodeFromLines } from 'toon';
+
+const lines = [
+  'items[2]:',
+  '  - value: 1'
+];
+
+const result = decodeFromLines(lines, { strict: false });
+console.log(result);
+// Output: { items: [{ value: 1 }] }
+```
+
+</CodeGroup>
+
+## Use Cases
+
+### Pre-split Input
+
+When you already have lines from another source (file streams, network, etc.), `decodeFromLines` is more efficient than joining and splitting:
+
+```typescript
+import { decodeFromLines } from 'toon';
+
+// Already have lines from somewhere
+const lines = fetchLinesFromSource();
+
+// More efficient than:
+// const toonString = lines.join('\n');
+// const result = decode(toonString);
+
+const result = decodeFromLines(lines);
+```
+
+### Streaming Decode with Full Value
+
+When you want to stream input but need the complete value (with path expansion):
+
+```typescript
+import { decodeFromLines } from 'toon';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
+
+const fileStream = createReadStream('large-data.toon');
+const rl = createInterface({ 
+  input: fileStream,
+  crlfDelay: Infinity 
+});
+
+// Builds complete value from streamed lines
+const result = decodeFromLines(rl, { 
+  expandPaths: 'safe' 
+});
+```
+
+### Processing Line Arrays
+
+```typescript
+import { decodeFromLines } from 'toon';
+
+const rawData = `
+name: Alice
+age: 30
+role: developer
+`.trim();
+
+const lines = rawData.split('\n');
+const result = decodeFromLines(lines);
+
+console.log(result);
+// Output: { name: 'Alice', age: 30, role: 'developer' }
+```
+
+## Comparison with decode()
+
+`decodeFromLines` is essentially equivalent to:
+
+```typescript
+import { decode } from 'toon';
+
+function decodeFromLinesEquivalent(
+  lines: Iterable<string>, 
+  options?: DecodeOptions
+): JsonValue {
+  const toonString = Array.from(lines).join('\n');
+  return decode(toonString, options);
+}
+```
+
+However, `decodeFromLines` is more efficient when you already have lines, as it avoids the join and re-split operations.
+
+## Related Functions
+
+- [decode](/api/decode) - Decode from a complete TOON string
+- [encodeLines](/api/encode-lines) - Encode to lines for streaming

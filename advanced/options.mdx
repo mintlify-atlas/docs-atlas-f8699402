@@ -1,0 +1,495 @@
+---
+title: Encoding & Decoding Options
+description: Complete reference for all TOON encoding and decoding options with types, defaults, and usage examples
+---
+
+TOON provides extensive configuration options for encoding and decoding. This page documents all available options with their types, defaults, and use cases.
+
+## Encoding Options
+
+Configure how JavaScript values are encoded into TOON format.
+
+### `indent`
+
+<ParamField path="indent" type="number" default="2">
+  Number of spaces per indentation level.
+</ParamField>
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  users: [{ id: 1 }, { id: 2 }]
+}
+
+// Default (2 spaces)
+encode(data)
+// users[2]{id}:
+//   1
+//   2
+
+// 4 spaces
+encode(data, { indent: 4 })
+// users[2]{id}:
+//     1
+//     2
+
+// Compact (0 spaces)
+encode(data, { indent: 0 })
+// users[2]{id}:
+// 1
+// 2
+```
+
+**Use cases:**
+- `2` - Human-readable default
+- `4` - Match JSON or YAML conventions
+- `0` - Maximum token efficiency
+
+### `delimiter`
+
+<ParamField path="delimiter" type="',' | '\t' | '|'" default="','">
+  Delimiter character for tabular array rows and inline primitive arrays.
+</ParamField>
+
+```ts
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const data = { users: [{ id: 1, name: 'Alice' }] }
+
+// Comma (default)
+encode(data, { delimiter: DELIMITERS.comma })
+// users[1]{id,name}:
+//   1,Alice
+
+// Tab (most efficient)
+encode(data, { delimiter: DELIMITERS.tab })
+// users[1]{id\tname}:
+//   1\tAlice
+
+// Pipe
+encode(data, { delimiter: DELIMITERS.pipe })
+// users[1]{id|name}:
+//   1|Alice
+```
+
+**Token efficiency:**
+- Tab (`\t`) - **Most efficient** (~5-10% fewer tokens)
+- Comma (`,`) - Default, human-readable
+- Pipe (`|`) - Alternative for comma-heavy data
+
+<Tip>
+Use `DELIMITERS.tab` for production LLM inputs where token count is critical.
+</Tip>
+
+### `keyFolding`
+
+<ParamField path="keyFolding" type="'off' | 'safe'" default="'off'">
+  Enable key folding to collapse single-key wrapper chains into dotted paths.
+</ParamField>
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  api: {
+    config: {
+      timeout: 5000,
+      retries: 3
+    }
+  }
+}
+
+// Without key folding (default)
+encode(data)
+// api:
+//   config:
+//     timeout: 5000
+//     retries: 3
+
+// With key folding
+encode(data, { keyFolding: 'safe' })
+// api.config.timeout: 5000
+// api.config.retries: 3
+```
+
+**Behavior:**
+- `'off'` - No folding (default)
+- `'safe'` - Fold single-key chains into dotted paths (e.g., `a.b.c`)
+  - Only folds when all segments are valid identifiers
+  - Stops at multi-key objects, arrays, or primitives
+  - Avoids collisions with literal dotted keys
+
+<Note>
+When encoding with `keyFolding: 'safe'`, decode with `expandPaths: 'safe'` to reconstruct the original nested structure.
+</Note>
+
+### `flattenDepth`
+
+<ParamField path="flattenDepth" type="number" default="Infinity">
+  Maximum number of segments to fold when `keyFolding` is enabled.
+</ParamField>
+
+```ts
+import { encode } from '@toon-format/toon'
+
+const data = {
+  a: { b: { c: { d: { e: 5 } } } }
+}
+
+// Unlimited folding (default)
+encode(data, { keyFolding: 'safe' })
+// a.b.c.d.e: 5
+
+// Limit to 2 segments
+encode(data, { keyFolding: 'safe', flattenDepth: 2 })
+// a.b:
+//   c:
+//     d:
+//       e: 5
+
+// Limit to 3 segments
+encode(data, { keyFolding: 'safe', flattenDepth: 3 })
+// a.b.c:
+//   d:
+//     e: 5
+```
+
+**Use cases:**
+- `Infinity` - Fold entire chains (default)
+- `2-5` - Limit folding depth for readability
+- `0` or `1` - Effectively disables folding
+
+### `replacer`
+
+<ParamField path="replacer" type="function" default="undefined">
+  A function to transform or filter values during encoding.
+</ParamField>
+
+**Type signature:**
+```ts
+type EncodeReplacer = (
+  key: string,
+  value: JsonValue,
+  path: readonly (string | number)[]
+) => unknown
+```
+
+**Basic example:**
+```ts
+import { encode } from '@toon-format/toon'
+
+const user = { name: 'Alice', password: 'secret' }
+
+// Remove sensitive fields
+const safe = encode(user, {
+  replacer: (key, value) => {
+    if (key === 'password') return undefined
+    return value
+  }
+})
+// name: Alice
+```
+
+See [Replacer Function](/advanced/replacer-function) for comprehensive documentation and examples.
+
+## Decoding Options
+
+Configure how TOON strings are decoded into JavaScript values.
+
+### `indent`
+
+<ParamField path="indent" type="number" default="2">
+  Number of spaces per indentation level (must match encoding).
+</ParamField>
+
+```ts
+import { decode } from '@toon-format/toon'
+
+const toonString = `
+users[2]{id}:
+    1
+    2
+`
+
+// Decode with 4-space indentation
+const data = decode(toonString, { indent: 4 })
+// { users: [{ id: 1 }, { id: 2 }] }
+```
+
+<Note>
+The `indent` option must match the indentation used during encoding. Mismatched indentation will cause parse errors.
+</Note>
+
+### `strict`
+
+<ParamField path="strict" type="boolean" default="true">
+  Enable strict validation of array lengths and tabular row counts.
+</ParamField>
+
+```ts
+import { decode } from '@toon-format/toon'
+
+// Array declares length [3] but only has 2 rows
+const invalid = `
+users[3]{id}:
+  1
+  2
+`
+
+// Strict mode (default) - throws error
+try {
+  decode(invalid, { strict: true })
+} catch (error) {
+  console.error('Array length mismatch!')
+}
+
+// Non-strict mode - allows mismatch
+const data = decode(invalid, { strict: false })
+// { users: [{ id: 1 }, { id: 2 }] }
+```
+
+**Validation checks:**
+- Array declared length `[N]` matches actual row count
+- Tabular row field counts match header `{fields}`
+- All array elements are present
+
+<Tip>
+Use `strict: true` (default) in production to catch corrupted or truncated data. Disable only for testing or when processing known-good inputs.
+</Tip>
+
+### `expandPaths`
+
+<ParamField path="expandPaths" type="'off' | 'safe'" default="'off'">
+  Enable path expansion to reconstruct dotted keys into nested objects.
+</ParamField>
+
+```ts
+import { decode } from '@toon-format/toon'
+
+const folded = `
+api.config.timeout: 5000
+api.config.retries: 3
+`
+
+// Without path expansion (default)
+decode(folded)
+// { 'api.config.timeout': 5000, 'api.config.retries': 3 }
+
+// With path expansion
+decode(folded, { expandPaths: 'safe' })
+// { api: { config: { timeout: 5000, retries: 3 } } }
+```
+
+**Behavior:**
+- `'off'` - Treat dotted keys as literals (default)
+- `'safe'` - Expand dotted keys into nested objects
+  - Only expands when all segments are valid identifiers
+  - Pairs with `keyFolding: 'safe'` for lossless round-trips
+
+<Note>
+Path expansion is **not supported in streaming mode** (`decodeStream`, `decodeStreamSync`). Use `decodeFromLines` for path expansion with pre-split lines.
+</Note>
+
+## Streaming Options
+
+Options for streaming decode operations.
+
+### `DecodeStreamOptions`
+
+Streaming decode supports a subset of `DecodeOptions`:
+
+```ts
+interface DecodeStreamOptions {
+  indent?: number    // Default: 2
+  strict?: boolean   // Default: true
+  // expandPaths is NOT supported in streaming mode
+}
+```
+
+**Example:**
+```ts
+import { decodeStream } from '@toon-format/toon'
+
+const lines = ['users[2]{id}:', '  1', '  2']
+
+for await (const event of decodeStream(lines, { strict: true })) {
+  console.log(event)
+  // { type: 'startObject' }
+  // { type: 'key', key: 'users' }
+  // { type: 'startArray', length: 2 }
+  // ...
+}
+```
+
+<Note>
+**Why no `expandPaths` in streaming?** Path expansion requires buffering the full object tree to resolve nested structures. Streaming decode yields events incrementally without building the tree.
+</Note>
+
+## Type Definitions
+
+Full TypeScript type definitions:
+
+```ts
+import type { Delimiter, DelimiterKey } from '@toon-format/toon'
+
+// Delimiter types
+type DelimiterKey = 'comma' | 'tab' | 'pipe'
+type Delimiter = ',' | '\t' | '|'
+
+const DELIMITERS: {
+  comma: ','
+  tab: '\t'
+  pipe: '|'
+}
+
+// Encode options
+interface EncodeOptions {
+  indent?: number
+  delimiter?: Delimiter
+  keyFolding?: 'off' | 'safe'
+  flattenDepth?: number
+  replacer?: EncodeReplacer
+}
+
+type EncodeReplacer = (
+  key: string,
+  value: JsonValue,
+  path: readonly (string | number)[]
+) => unknown
+
+// Decode options
+interface DecodeOptions {
+  indent?: number
+  strict?: boolean
+  expandPaths?: 'off' | 'safe'
+}
+
+// Streaming decode options (no expandPaths)
+interface DecodeStreamOptions {
+  indent?: number
+  strict?: boolean
+}
+```
+
+## Default Values
+
+All options with their defaults:
+
+| Option | Type | Default | Context |
+|--------|------|---------|--------|
+| `indent` | `number` | `2` | Encode, Decode |
+| `delimiter` | `Delimiter` | `','` | Encode |
+| `keyFolding` | `'off' \| 'safe'` | `'off'` | Encode |
+| `flattenDepth` | `number` | `Infinity` | Encode |
+| `replacer` | `function` | `undefined` | Encode |
+| `strict` | `boolean` | `true` | Decode |
+| `expandPaths` | `'off' \| 'safe'` | `'off'` | Decode (non-streaming) |
+
+## Option Combinations
+
+### Maximum Token Efficiency
+
+```ts
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const optimized = encode(data, {
+  indent: 0,                    // No indentation
+  delimiter: DELIMITERS.tab,    // Tab delimiter
+  keyFolding: 'safe',           // Collapse nested keys
+})
+```
+
+### Human-Readable Output
+
+```ts
+import { encode, DELIMITERS } from '@toon-format/toon'
+
+const readable = encode(data, {
+  indent: 2,                    // Standard indentation
+  delimiter: DELIMITERS.comma,  // Comma delimiter
+  keyFolding: 'off',            // No folding
+})
+```
+
+### Round-Trip with Key Folding
+
+```ts
+import { encode, decode } from '@toon-format/toon'
+
+const original = { a: { b: { c: 1 } } }
+
+// Encode with key folding
+const encoded = encode(original, { keyFolding: 'safe' })
+// a.b.c: 1
+
+// Decode with path expansion
+const decoded = decode(encoded, { expandPaths: 'safe' })
+// { a: { b: { c: 1 } } }
+
+assert.deepEqual(decoded, original) // ✅ Lossless round-trip
+```
+
+### Lenient Parsing
+
+```ts
+import { decode } from '@toon-format/toon'
+
+// Decode with relaxed validation
+const data = decode(toonString, {
+  strict: false,   // Allow length mismatches
+  indent: 2,       // Standard indentation
+})
+```
+
+## Validation
+
+TOON validates inputs during encoding/decoding:
+
+### Encoding Validation
+
+- All values are normalized to JSON data model
+- Non-JSON types (Date, BigInt, etc.) are converted
+- Circular references cause errors
+- `replacer` return values are re-normalized
+
+### Decoding Validation
+
+- Indentation must be consistent
+- Array lengths `[N]` must match row counts (when `strict: true`)
+- Tabular rows must match field count in `{fields}` header
+- Quoted strings must be properly escaped
+- Primitives must be valid (booleans, numbers, null)
+
+<Tip>
+Use `strict: true` (default) to catch malformed TOON data early. Disable only when processing known-good inputs or during development.
+</Tip>
+
+## Performance Impact
+
+### Encoding Options Impact
+
+| Option | Performance Impact | Token Impact |
+|--------|--------------------|-------------|
+| `indent: 0` | None | −3-5% tokens |
+| `delimiter: tab` | None | −5-10% tokens |
+| `keyFolding: 'safe'` | Minimal | −20-40% tokens (nested data) |
+| `replacer` | Moderate (per-value) | Varies |
+
+### Decoding Options Impact
+
+| Option | Performance Impact |
+|--------|--------------------|
+| `strict: true` | Minimal (validation overhead) |
+| `expandPaths: 'safe'` | Moderate (tree reconstruction) |
+
+<Note>
+For large datasets, use streaming APIs (`encodeLines`, `decodeStream`) regardless of options to minimize memory usage.
+</Note>
+
+## Examples
+
+See also:
+- [Performance Guide](/advanced/performance) - Optimization strategies
+- [Replacer Function](/advanced/replacer-function) - Detailed replacer examples
+- [API Reference](/api/encode) - Complete API documentation
